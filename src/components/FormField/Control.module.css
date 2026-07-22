@@ -1,0 +1,71 @@
+.control {
+  width: 100%;
+  min-height: var(--touch-target, 3rem);
+  padding: 0.6875rem 0.875rem;
+  color: var(--color-text, #17202a);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border-strong, #aebbc5);
+  border-radius: var(--radius-sm, 0.5rem);
+  font-size: 1rem;
+  line-height: 1.5;
+  box-shadow: inset 0 1px 1px rgb(23 32 42 / 0.03);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.control::placeholder {
+  color: #6d7883;
+  opacity: 1;
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--color-brand-600, #1f638f);
+}
+
+.control:focus {
+  border-color: var(--color-focus, #086eb8);
+  outline: none;
+  box-shadow: var(--focus-ring, 0 0 0 3px rgb(8 110 184 / 0.26));
+}
+
+.control:disabled {
+  color: var(--color-text-muted, #5b6774);
+  background: #edf1f3;
+  cursor: not-allowed;
+}
+
+.hasError,
+.hasError:hover:not(:disabled) {
+  border-color: var(--color-danger, #9f2018);
+}
+
+.hasError:focus {
+  border-color: var(--color-danger, #9f2018);
+  box-shadow: 0 0 0 3px rgb(159 32 24 / 0.2);
+}
+
+.selectContainer {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.selectContainer::after {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 1rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-block-end: 2px solid var(--color-text-muted, #5b6774);
+  border-inline-end: 2px solid var(--color-text-muted, #5b6774);
+  content: '';
+  pointer-events: none;
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.select {
+  padding-inline-end: 2.75rem;
+  appearance: none;
+}

@@ -1,0 +1,70 @@
+:root {
+  color-scheme: light;
+
+  --color-brand-50: #eef7fb;
+  --color-brand-100: #d9edf6;
+  --color-brand-200: #b8ddeb;
+  --color-brand-500: #2679a8;
+  --color-brand-600: #1f638f;
+  --color-brand-700: #174a6e;
+  --color-brand-800: #153f5d;
+  --color-brand-900: #13364e;
+
+  --color-canvas: #f4f7f9;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f8fafb;
+  --color-text: #17202a;
+  --color-text-muted: #5b6774;
+  --color-border: #d8e0e6;
+  --color-border-strong: #aebbc5;
+  --color-focus: #086eb8;
+
+  --color-success: #17663d;
+  --color-success-surface: #eaf6ef;
+  --color-success-border: #9fd4b7;
+  --color-warning: #7a4a00;
+  --color-warning-surface: #fff5d6;
+  --color-warning-border: #e9c767;
+  --color-danger: #9f2018;
+  --color-danger-surface: #fcedeb;
+  --color-danger-border: #e9aaa5;
+  --color-info: #155b8a;
+  --color-info-surface: #eaf4fa;
+  --color-info-border: #a8cee3;
+
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.375rem;
+  --font-size-2xl: clamp(1.625rem, 4vw, 2.125rem);
+
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgb(23 32 42 / 0.06);
+  --shadow-md: 0 8px 24px rgb(23 32 42 / 0.08);
+
+  --focus-ring: 0 0 0 3px rgb(8 110 184 / 0.26);
+  --content-width: 70rem;
+  --form-width: 44rem;
+  --touch-target: 3rem;
+}

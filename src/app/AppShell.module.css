@@ -1,0 +1,222 @@
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-bottom: calc(4.75rem + env(safe-area-inset-bottom));
+}
+
+.header {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+  border-bottom: 1px solid rgb(216 224 230 / 0.85);
+  background: rgb(255 255 255 / 0.94);
+  backdrop-filter: blur(14px);
+}
+
+.headerInner {
+  display: flex;
+  min-height: 4.5rem;
+  max-width: var(--content-width);
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 auto;
+}
+
+.brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.brand:hover {
+  color: var(--color-text);
+}
+
+.brandMark {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: white;
+  background: linear-gradient(145deg, var(--color-brand-600), var(--color-brand-800));
+  border-radius: 0.9rem;
+  box-shadow: 0 7px 18px rgb(23 74 110 / 0.18);
+}
+
+.brand strong,
+.brand small {
+  display: block;
+  overflow: hidden;
+  max-width: 13rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.brand small {
+  margin-top: 0.1rem;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.desktopNavigation {
+  display: none;
+  flex: 1;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.navLink {
+  display: inline-flex;
+  min-height: var(--touch-target);
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 650;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+}
+
+.navLink:hover {
+  color: var(--color-brand-800);
+  background: var(--color-brand-50);
+}
+
+.navLinkActive {
+  color: var(--color-brand-800);
+  background: var(--color-brand-100);
+}
+
+.adminLink {
+  display: inline-flex;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  color: var(--color-brand-700);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+.adminLink span {
+  display: none;
+}
+
+.main {
+  width: 100%;
+  max-width: var(--content-width);
+  padding: var(--space-6) var(--space-4) var(--space-12);
+  margin: 0 auto;
+}
+
+.footer {
+  display: none;
+  max-width: var(--content-width);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-4);
+  margin: 0 auto;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+}
+
+.footer div,
+.footer strong,
+.footer span {
+  display: block;
+}
+
+.footer strong {
+  color: var(--color-text);
+}
+
+.mobileNavigation {
+  position: fixed;
+  z-index: 40;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: var(--space-2) max(var(--space-2), env(safe-area-inset-right))
+    calc(var(--space-2) + env(safe-area-inset-bottom))
+    max(var(--space-2), env(safe-area-inset-left));
+  background: rgb(255 255 255 / 0.98);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -8px 24px rgb(23 32 42 / 0.07);
+}
+
+.mobileNavigation .navLink {
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: var(--space-2) var(--space-1);
+  font-size: 0.68rem;
+}
+
+@media (min-width: 48rem) {
+  .shell {
+    padding-bottom: 0;
+  }
+
+  .headerInner {
+    padding-inline: var(--space-6);
+  }
+
+  .desktopNavigation {
+    display: flex;
+  }
+
+  .adminLink {
+    width: auto;
+    gap: var(--space-2);
+    padding-inline: var(--space-3);
+  }
+
+  .adminLink span {
+    display: inline;
+    font-size: var(--font-size-sm);
+    font-weight: 650;
+  }
+
+  .main {
+    padding: var(--space-8) var(--space-6) var(--space-12);
+  }
+
+  .footer {
+    display: flex;
+    padding-inline: var(--space-6);
+  }
+
+  .mobileNavigation {
+    display: none;
+  }
+}
+
+@media (min-width: 68rem) {
+  .desktopNavigation {
+    gap: var(--space-2);
+  }
+
+  .navLink {
+    padding-inline: var(--space-4);
+  }
+}

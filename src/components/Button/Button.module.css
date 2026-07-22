@@ -1,0 +1,117 @@
+.button {
+  display: inline-flex;
+  min-height: var(--touch-target, 3rem);
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2, 0.5rem);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 0.75rem);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 0.08));
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.button:focus-visible {
+  outline: 3px solid var(--color-focus, #086eb8);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  transform: none;
+}
+
+.medium {
+  min-height: var(--touch-target, 3rem);
+  padding: 0.75rem 1.125rem;
+  font-size: 1rem;
+}
+
+.small {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+}
+
+.primary {
+  color: #fff;
+  background: var(--color-brand-700, #174a6e);
+  border-color: var(--color-brand-700, #174a6e);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--color-brand-800, #153f5d);
+  border-color: var(--color-brand-800, #153f5d);
+}
+
+.secondary {
+  color: var(--color-brand-800, #153f5d);
+  background: var(--color-surface, #fff);
+  border-color: var(--color-border-strong, #aebbc5);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--color-brand-50, #eef7fb);
+  border-color: var(--color-brand-600, #1f638f);
+}
+
+.ghost {
+  color: var(--color-brand-700, #174a6e);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--color-brand-50, #eef7fb);
+}
+
+.danger {
+  color: #fff;
+  background: var(--color-danger, #9f2018);
+  border-color: var(--color-danger, #9f2018);
+}
+
+.danger:hover:not(:disabled) {
+  background: #7d1913;
+  border-color: #7d1913;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.spinner {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

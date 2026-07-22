@@ -1,0 +1,42 @@
+.card {
+  min-width: 0;
+  border-radius: var(--radius-lg, 1rem);
+}
+
+.default {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d8e0e6);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 0.08));
+}
+
+.accent {
+  background: var(--color-brand-50, #eef7fb);
+  border: 1px solid var(--color-brand-200, #b8ddeb);
+}
+
+.subtle {
+  background: var(--color-surface-subtle, #f8fafb);
+  border: 1px solid transparent;
+}
+
+.small {
+  padding: var(--space-3, 0.75rem);
+}
+
+.medium {
+  padding: var(--space-4, 1rem);
+}
+
+.large {
+  padding: var(--space-5, 1.25rem);
+}
+
+@media (min-width: 48rem) {
+  .medium {
+    padding: var(--space-5, 1.25rem);
+  }
+
+  .large {
+    padding: var(--space-8, 2rem);
+  }
+}

@@ -1,0 +1,54 @@
+.loading {
+  color: var(--color-text-muted, #5b6774);
+  font-size: var(--font-size-sm, 0.875rem);
+  font-weight: 600;
+}
+
+.block {
+  display: flex;
+  min-height: 8rem;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+  padding: var(--space-6, 1.5rem);
+  text-align: center;
+}
+
+.inline {
+  display: inline-flex;
+  min-height: 1.5rem;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}
+
+.spinner {
+  flex: 0 0 auto;
+  border: 3px solid var(--color-brand-100, #d9edf6);
+  border-block-start-color: var(--color-brand-700, #174a6e);
+  border-radius: 50%;
+  animation: spin 750ms linear infinite;
+}
+
+.small {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+}
+
+.medium {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.large {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-width: 4px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
