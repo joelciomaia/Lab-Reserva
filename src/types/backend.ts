@@ -1,55 +1,48 @@
 import type { Laboratory } from './laboratory';
 import type { CreateReservationRequest, Reservation } from './reservation';
-import type { Resource } from './resource';
-import type { AvailabilityRequest, AvailabilityResponse, ClassPeriod, Shift } from './schedule';
-import type { ReservationRules, School, SchoolNotice } from './school';
-import type { CurrentUser, Teacher } from './user';
+import type { AvailabilityRequest, AvailabilityResponse, ClassPeriod } from './schedule';
+import type { School } from './school';
+import type {
+  AdminConfiguration,
+  BookingFormConfiguration,
+  ConfiguredClassGroup,
+  ConfiguredResource,
+  ConfiguredSubject,
+  SaveAdminConfigurationRequest,
+} from './configuration';
 
 export interface BootstrapParams {
   preselectedLaboratoryId?: string;
 }
 
 export interface BootstrapData {
-  setupCompleted: boolean;
   school: School;
   laboratories: Laboratory[];
-  resources: Resource[];
-  shifts: Shift[];
   periods: ClassPeriod[];
-  reservationRules: ReservationRules;
-  notices: SchoolNotice[];
-  currentUser?: CurrentUser;
+  classGroups: ConfiguredClassGroup[];
+  subjects: ConfiguredSubject[];
+  resources: ConfiguredResource[];
+  bookingForm: BookingFormConfiguration;
+  configurationRevision: string;
+  /** SHA-256 público usado para provar qual planilha alimenta o Web App. */
+  sourceSpreadsheetFingerprint: string;
   preselectedLaboratoryId?: string;
-}
-
-export interface AdminData {
-  school: School;
-  laboratories: Laboratory[];
-  resources: Resource[];
-  teachers: Teacher[];
-  activeReservations: number;
-  pendingCalendarSynchronizations: number;
-}
-
-export interface InitialSetupData {
-  school: School;
-  laboratories: Laboratory[];
-  resources: Resource[];
-  teachers: Teacher[];
-  shifts: Shift[];
-  periods: ClassPeriod[];
-  reservationRules: ReservationRules;
 }
 
 export interface BackendClient {
   getBootstrapData(params?: BootstrapParams): Promise<BootstrapData>;
   getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse>;
   createReservation(request: CreateReservationRequest): Promise<Reservation>;
-  cancelReservation(reservationId: string): Promise<void>;
-  getReservation(reservationId: string): Promise<Reservation>;
-  getMyReservations(userId?: string): Promise<Reservation[]>;
-  getAdminData(): Promise<AdminData>;
-  saveInitialSetup(data: InitialSetupData): Promise<void>;
+}
+
+/**
+ * Projeção administrativa usada somente por implementações locais de teste.
+ * Em produção, a configuração é lida e salva diretamente pelo provider do
+ * Google Sheets, sem expor operações administrativas na API pública.
+ */
+export interface AdminConfigurationClient {
+  getAdminConfiguration(): Promise<AdminConfiguration>;
+  saveAdminConfiguration(request: SaveAdminConfigurationRequest): Promise<AdminConfiguration>;
 }
 
 export type { AvailabilityRequest, AvailabilityResponse, CreateReservationRequest, Reservation };

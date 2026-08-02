@@ -2,19 +2,17 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 const routeTitles: Record<string, string> = {
-  '/': 'Início',
-  '/reservar': 'Nova reserva',
-  '/disponibilidade': 'Consultar agenda',
-  '/minhas-reservas': 'Minhas reservas',
-  '/admin': 'Administração',
-  '/configuracao-inicial': 'Configuração inicial',
+  '/': 'Agenda semanal',
+  '/agendar': 'Fazer agendamento',
 };
 
 export function RouteFocus() {
   const location = useLocation();
 
   useEffect(() => {
-    const pageTitle = routeTitles[location.pathname] ?? 'Página não encontrada';
+    const pageTitle = location.pathname.startsWith('/gerenciar')
+      ? 'Painel do gerenciador'
+      : (routeTitles[location.pathname] ?? 'Agenda semanal');
     document.title = `${pageTitle} | Lab Reserva`;
     const frame = window.requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('main h1')?.focus();

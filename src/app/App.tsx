@@ -1,4 +1,5 @@
 import type { BackendClient } from '../types';
+import { GoogleSheetsProvider } from '../integrations/google/GoogleSheetsProvider';
 import { AppShell } from './AppShell';
 import { BootstrapProvider } from './BootstrapContext';
 import { RouteFocus } from './RouteFocus';
@@ -10,11 +11,13 @@ export interface AppProps {
 
 export function App({ client }: AppProps) {
   return (
-    <BootstrapProvider {...(client ? { client } : {})}>
-      <RouteFocus />
-      <AppShell>
-        <AppRoutes />
-      </AppShell>
-    </BootstrapProvider>
+    <GoogleSheetsProvider>
+      <BootstrapProvider {...(client ? { client } : {})}>
+        <RouteFocus />
+        <AppShell>
+          <AppRoutes />
+        </AppShell>
+      </BootstrapProvider>
+    </GoogleSheetsProvider>
   );
 }

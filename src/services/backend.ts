@@ -1,8 +1,13 @@
 import type { BackendClient } from '../types';
-import { MockBackend } from './mockBackend';
+import { AppsScriptBackend, UnconfiguredBackend } from './appsScriptBackend';
 
-export function createBackendClient(): BackendClient {
-  return new MockBackend();
+export interface BackendClientOptions {
+  appsScriptUrl?: string;
+}
+
+export function createBackendClient(options: BackendClientOptions = {}): BackendClient {
+  const endpoint = options.appsScriptUrl ?? import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL;
+  return endpoint?.trim() ? new AppsScriptBackend(endpoint) : new UnconfiguredBackend();
 }
 
 export const backendClient = createBackendClient();

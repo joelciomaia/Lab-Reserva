@@ -1,22 +1,36 @@
-import { Route, Routes } from 'react-router-dom';
-import { AdminPage } from '../pages/AdminPage';
-import { AvailabilityPage } from '../pages/AvailabilityPage';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { useGoogleSheets } from '../integrations/google/GoogleSheetsProvider';
 import { BookingPage } from '../pages/BookingPage';
-import { HomePage } from '../pages/HomePage';
-import { InitialSetupPage } from '../pages/InitialSetupPage';
-import { MyReservationsPage } from '../pages/MyReservationsPage';
-import { NotFoundPage } from '../pages/NotFoundPage';
+import { GoogleLoginPage } from '../pages/GoogleLoginPage';
+import { ManagerPage } from '../pages/ManagerPage';
+import { WeeklySchedulePage } from '../pages/WeeklySchedulePage';
+
+function ProtectedManagerPage() {
+  const location = useLocation();
+  const { isAuthorized } = useGoogleSheets();
+
+  if (!isAuthorized) {
+    return (
+      <Navigate
+        to="/gerenciar/entrar"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
+  }
+
+  return <ManagerPage />;
+}
 
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/reservar" element={<BookingPage />} />
-      <Route path="/disponibilidade" element={<AvailabilityPage />} />
-      <Route path="/minhas-reservas" element={<MyReservationsPage />} />
-      <Route path="/admin" element={<AdminPage />} />
-      <Route path="/configuracao-inicial" element={<InitialSetupPage />} />
-      <Route path="*" element={<NotFoundPage />} />
+      <Route path="/" element={<WeeklySchedulePage />} />
+      <Route path="/agendar" element={<BookingPage />} />
+      <Route path="/gerenciar" element={<Navigate to="/gerenciar/geral" replace />} />
+      <Route path="/gerenciar/entrar" element={<GoogleLoginPage />} />
+      <Route path="/gerenciar/:section" element={<ProtectedManagerPage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

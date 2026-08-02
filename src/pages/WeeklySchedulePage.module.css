@@ -1,0 +1,212 @@
+.page {
+  width: min(100%, 87.5rem);
+  min-width: 0;
+  min-height: 100dvh;
+  padding: var(--space-4) 0.75rem var(--space-6);
+  margin: 0 auto;
+}
+
+.pageHeader {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.identity {
+  min-width: 0;
+}
+
+.identity p {
+  margin: 0 0 0.125rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.identity h1 {
+  margin: 0;
+  font-size: clamp(1.375rem, 6vw, 1.75rem);
+  letter-spacing: -0.02em;
+}
+
+.identity h1:focus {
+  outline: none;
+}
+
+.headerActions {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.bookingButton {
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0.7rem var(--space-4);
+  color: var(--color-surface);
+  background: var(--color-brand-700);
+  border-radius: var(--radius-sm);
+  font-size: 0.9375rem;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.bookingButton:hover {
+  color: var(--color-surface);
+  background: var(--color-brand-800);
+}
+
+.managerLink {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  gap: 0.3rem;
+  padding: 0.25rem var(--space-2);
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.managerLink:hover {
+  color: var(--color-brand-700);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.successMessage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
+  color: var(--color-success);
+  background: var(--color-success-surface);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.weekSection {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.todayButton,
+.iconButton {
+  min-height: 2.75rem;
+}
+
+.todayButton {
+  padding-inline: var(--space-3);
+}
+
+.iconButton {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.weekNavigation {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.weekTitle {
+  min-width: 0;
+  text-align: center;
+}
+
+.weekTitle h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: clamp(0.875rem, 3.8vw, 1.125rem);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statePage {
+  display: grid;
+  width: min(100% - 2rem, 36rem);
+  min-height: 100dvh;
+  place-items: center;
+  margin: 0 auto;
+}
+
+.errorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (min-width: 36rem) {
+  .page {
+    padding: var(--space-5) var(--space-4) var(--space-8);
+  }
+
+  .pageHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .headerActions {
+    justify-items: end;
+  }
+
+  .bookingButton {
+    min-width: 12.5rem;
+  }
+
+  .toolbar {
+    grid-template-columns: 1fr minmax(18rem, 32rem) 1fr;
+  }
+
+  .todayButton {
+    justify-self: start;
+  }
+
+  .weekNavigation {
+    grid-column: 2;
+  }
+}
+
+@media (min-width: 64rem) {
+  .page {
+    padding: var(--space-6) var(--space-6) var(--space-10);
+  }
+
+  .pageHeader {
+    margin-bottom: var(--space-5);
+  }
+
+  .identity h1 {
+    font-size: 1.875rem;
+  }
+
+  .toolbar {
+    gap: var(--space-4);
+  }
+}

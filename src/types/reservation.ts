@@ -1,40 +1,55 @@
-import type { ReservationResource } from './resource';
-
-export type ReservationStatus = 'ACTIVE' | 'CANCELLED' | 'COMPLETED';
-export type CalendarSyncStatus = 'SYNCED' | 'PENDING' | 'DISABLED';
-
 export interface Reservation {
   id: string;
-  recurrenceGroupId?: string;
-  status: ReservationStatus;
   date: string;
   laboratoryId: string;
   laboratoryName: string;
-  teacherId: string;
   teacherName: string;
-  teacherEmail: string;
   classGroup: string;
   subject: string;
-  purpose: string;
-  studentCount: number;
   periodIds: string[];
   periodLabels: string[];
-  resources: ReservationResource[];
+  periodTimes?: string[];
+  knowledgeObjects: string;
+  itemsUsed: string;
   notes: string;
   createdAt: string;
-  calendarStatus: CalendarSyncStatus;
+}
+
+export type ReservationStatus = 'CONFIRMED' | 'PARTIALLY_CANCELLED' | 'CANCELLED';
+
+export interface ReservationCancellation {
+  id: string;
+  reservationId: string;
+  periodId: string;
+  periodLabel: string;
+  cancelledAt: string;
+  cancelledBy: string;
+  reason: string;
+}
+
+export interface ManagedReservation extends Reservation {
+  status: ReservationStatus;
+  activePeriodIds: string[];
+  cancelledPeriodIds: string[];
+  periodTimes: string[];
+  cancellations: ReservationCancellation[];
+}
+
+export interface CancelReservationPeriodsRequest {
+  reservationId: string;
+  periodIds: string[];
+  cancelledBy: string;
+  reason: string;
 }
 
 export interface CreateReservationRequest {
-  teacherId: string;
-  teacherEmail: string;
   laboratoryId: string;
-  date: string;
-  classGroup: string;
+  teacherName: string;
   subject: string;
-  purpose: string;
-  studentCount: number;
+  classGroup: string;
+  date: string;
   periodIds: string[];
-  resources: { resourceId: string; quantity: number }[];
+  knowledgeObjects: string;
+  itemsUsed: string;
   notes: string;
 }

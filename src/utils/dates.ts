@@ -1,4 +1,5 @@
-import { addDays, format, isAfter, isBefore, isValid, parse } from 'date-fns';
+import { addDays, format, getISODay, isAfter, isBefore, isValid, parse } from 'date-fns';
+import type { IsoWeekday } from '../types/schedule';
 
 const ISO_DATE_FORMAT = 'yyyy-MM-dd';
 const DISPLAY_DATE_FORMAT = 'dd/MM/yyyy';
@@ -52,6 +53,12 @@ export function formatIsoDate(date: Date): string {
   }
 
   return format(date, ISO_DATE_FORMAT);
+}
+
+export function getIsoWeekday(value: string): IsoWeekday | null {
+  const parsedDate = parseIsoDate(value);
+
+  return parsedDate ? (getISODay(parsedDate) as IsoWeekday) : null;
 }
 
 export function formatDatePtBr(value: string, fallback = '—'): string {

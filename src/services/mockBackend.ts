@@ -1,209 +1,207 @@
 import type {
-  AdminData,
+  AdminConfiguration,
+  AdminConfigurationClient,
+  AdminConfigurationDraft,
   AvailabilityRequest,
   AvailabilityResponse,
   BackendClient,
+  BookingFormConfiguration,
   BootstrapData,
   BootstrapParams,
   ClassPeriod,
   CreateReservationRequest,
+  ConfiguredClassGroup,
+  ConfiguredResource,
+  ConfiguredSubject,
   Laboratory,
+  LaboratoryAdminConfiguration,
   Reservation,
-  Resource,
-  Shift,
-  Teacher,
+  SaveAdminConfigurationRequest,
+  SedScConfiguration,
+  School,
+  ShiftConfiguration,
 } from '../types';
 import { BackendError } from '../types';
+import {
+  createClassPeriods,
+  createDefaultLaboratoryAdminConfiguration,
+  DEFAULT_BOOKING_FORM_CONFIGURATION,
+  DEFAULT_CLASS_GROUPS,
+  DEFAULT_RESOURCES,
+  DEFAULT_SED_SC_CONFIGURATION,
+  DEFAULT_SHIFTS,
+  DEFAULT_SUBJECTS,
+  deriveShiftConfigurations,
+  validateAdminConfiguration,
+} from '../domain/configuration';
+import { getApplicableClassPeriods, sortClassPeriods } from '../domain/periods';
+import { isValidIsoDate } from '../utils/dates';
+import { getSchoolWeek } from '../utils/week';
 
-const school = {
+const defaultSchool: School = {
   id: 'SCHOOL-DEMO',
-  name: 'E.E. Horizonte do Saber',
-  code: '35000123',
-  city: 'Campinas',
-  state: 'SP',
-  institutionalEmail: 'laboratorio@horizontedosaber.edu.br',
-  academicYear: 2026,
-  timeZone: 'America/Sao_Paulo',
+  name: 'EEM Paulo Freire',
 };
 
-const laboratories: Laboratory[] = [
+const defaultLaboratories: Laboratory[] = [
   {
     id: 'LAB01',
     name: 'Laboratório de Informática',
-    description: 'Computadores, projeção e acesso à internet para atividades pedagógicas.',
-    capacity: 36,
-    useType: 'EXCLUSIVE',
-    maxSimultaneousClasses: 1,
-    calendarEnabled: true,
     active: true,
-    status: 'AVAILABLE',
-    statusMessage: 'Disponível para novas reservas',
   },
   {
     id: 'LAB02',
     name: 'Sala Maker',
-    description: 'Espaço flexível com kits de robótica e bancadas colaborativas.',
-    capacity: 24,
-    useType: 'SHARED',
-    maxSimultaneousClasses: 2,
-    calendarEnabled: true,
     active: true,
-    status: 'PARTIAL',
-    statusMessage: 'Alguns horários já possuem atividades',
   },
   {
     id: 'LAB03',
     name: 'Laboratório de Ciências',
-    description: 'Bancadas para práticas de biologia, química e física.',
-    capacity: 32,
-    useType: 'EXCLUSIVE',
-    maxSimultaneousClasses: 1,
-    calendarEnabled: false,
-    active: true,
-    status: 'MAINTENANCE',
-    statusMessage: 'Manutenção preventiva até sexta-feira',
-  },
-];
-
-const resources: Resource[] = [
-  {
-    id: 'REC01',
-    name: 'Notebooks',
-    category: 'Tecnologia',
-    controlType: 'QUANTITY',
-    totalQuantity: 20,
-    availableQuantity: 18,
-    laboratoryId: 'LAB01',
-    active: true,
-    notes: 'Dois equipamentos em manutenção.',
-  },
-  {
-    id: 'REC02',
-    name: 'Kits de robótica',
-    category: 'Robótica',
-    controlType: 'QUANTITY',
-    totalQuantity: 10,
-    availableQuantity: 10,
-    laboratoryId: 'LAB02',
-    active: true,
-  },
-  {
-    id: 'REC03',
-    name: 'Projetor móvel',
-    category: 'Audiovisual',
-    controlType: 'INDIVIDUAL',
-    totalQuantity: 2,
-    availableQuantity: 2,
     active: true,
   },
 ];
 
-const shifts: Shift[] = [
-  { id: 'SHIFT-MORNING', name: 'Manhã', order: 1, active: true },
-  { id: 'SHIFT-AFTERNOON', name: 'Tarde', order: 2, active: true },
-];
-
-const periods: ClassPeriod[] = [
-  ['P01', 'SHIFT-MORNING', 1, '1ª aula', '07:00', '07:50', 1],
-  ['P02', 'SHIFT-MORNING', 2, '2ª aula', '07:50', '08:40', 2],
-  ['P03', 'SHIFT-MORNING', 3, '3ª aula', '08:40', '09:30', 3],
-  ['P04', 'SHIFT-AFTERNOON', 1, '1ª aula — tarde', '13:00', '13:50', 4],
-  ['P05', 'SHIFT-AFTERNOON', 2, '2ª aula — tarde', '13:50', '14:40', 5],
-].map(([id, shiftId, classNumber, name, startTime, endTime, order]) => ({
-  id: String(id),
-  shiftId: String(shiftId),
-  classNumber: Number(classNumber),
-  name: String(name),
-  startTime: String(startTime),
-  endTime: String(endTime),
-  order: Number(order),
-  active: true,
+const defaultPeriods: ClassPeriod[] = createClassPeriods(DEFAULT_SHIFTS).map((period, index) => ({
+  ...period,
+  id: `P${String(index + 1).padStart(2, '0')}`,
 }));
 
-const teachers: Teacher[] = [
-  {
-    id: 'TEACHER01',
-    name: 'Ana Paula Ribeiro',
-    email: 'ana.ribeiro@horizontedosaber.edu.br',
-    role: 'TEACHER',
-    active: true,
-  },
-  {
-    id: 'TEACHER02',
-    name: 'Carlos Eduardo Lima',
-    email: 'carlos.lima@horizontedosaber.edu.br',
-    role: 'TEACHER',
-    active: true,
-  },
-  {
-    id: 'ADMIN01',
-    name: 'Marina Lopes',
-    email: 'marina.lopes@horizontedosaber.edu.br',
-    role: 'ADMINISTRATOR',
-    active: true,
-  },
-];
+function createInitialReservations(): Reservation[] {
+  const week = getSchoolWeek(new Date());
+  const createdAt = new Date().toISOString();
 
-const initialReservations: Reservation[] = [
-  {
-    id: 'RES-2026-0042',
-    status: 'ACTIVE',
-    date: '2026-08-12',
-    laboratoryId: 'LAB01',
-    laboratoryName: 'Laboratório de Informática',
-    teacherId: 'TEACHER01',
-    teacherName: 'Ana Paula Ribeiro',
-    teacherEmail: 'ana.ribeiro@horizontedosaber.edu.br',
-    classGroup: '8º A',
-    subject: 'Matemática',
-    purpose: 'Atividade de geometria dinâmica',
-    studentCount: 32,
-    periodIds: ['P01', 'P02'],
-    periodLabels: ['1ª aula', '2ª aula'],
-    resources: [],
-    notes: '',
-    createdAt: '2026-07-18T14:30:00-03:00',
-    calendarStatus: 'DISABLED',
-  },
-  {
-    id: 'RES-2026-0038',
-    status: 'ACTIVE',
-    date: '2026-08-15',
-    laboratoryId: 'LAB02',
-    laboratoryName: 'Sala Maker',
-    teacherId: 'TEACHER01',
-    teacherName: 'Ana Paula Ribeiro',
-    teacherEmail: 'ana.ribeiro@horizontedosaber.edu.br',
-    classGroup: '7º B',
-    subject: 'Tecnologia',
-    purpose: 'Introdução à robótica',
-    studentCount: 22,
-    periodIds: ['P04'],
-    periodLabels: ['1ª aula — tarde'],
-    resources: [{ resourceId: 'REC02', resourceName: 'Kits de robótica', quantity: 6 }],
-    notes: 'Organizar as equipes antes da aula.',
-    createdAt: '2026-07-16T09:10:00-03:00',
-    calendarStatus: 'DISABLED',
-  },
-];
+  return [
+    {
+      id: 'RES-2026-0001',
+      date: week[0]!.isoDate,
+      laboratoryId: 'LAB01',
+      laboratoryName: 'Laboratório de Informática',
+      teacherName: 'Ana Paula Ribeiro',
+      classGroup: '6º A',
+      subject: 'História',
+      periodIds: ['P01'],
+      periodLabels: ['1ª aula'],
+      knowledgeObjects: 'Patrimônio cultural e memória',
+      itemsUsed: 'Computadores',
+      notes: '',
+      createdAt,
+    },
+    {
+      id: 'RES-2026-0002',
+      date: week[1]!.isoDate,
+      laboratoryId: 'LAB01',
+      laboratoryName: 'Laboratório de Informática',
+      teacherName: 'Carlos Eduardo Lima',
+      classGroup: '7º B',
+      subject: 'Tecnologia',
+      periodIds: ['P01', 'P02'],
+      periodLabels: ['1ª aula', '2ª aula'],
+      knowledgeObjects: 'Cultura digital',
+      itemsUsed: 'Computadores e projetor',
+      notes: '',
+      createdAt,
+    },
+    {
+      id: 'RES-2026-0003',
+      date: week[2]!.isoDate,
+      laboratoryId: 'LAB01',
+      laboratoryName: 'Laboratório de Informática',
+      teacherName: 'Marina Lopes',
+      classGroup: '9º A',
+      subject: 'Matemática',
+      periodIds: ['P01', 'P02', 'P03'],
+      periodLabels: ['1ª aula', '2ª aula', '3ª aula'],
+      knowledgeObjects: 'Geometria plana e representações digitais',
+      itemsUsed: 'Computadores',
+      notes: 'Atividade em duplas.',
+      createdAt,
+    },
+    {
+      id: 'RES-2026-0004',
+      date: week[3]!.isoDate,
+      laboratoryId: 'LAB01',
+      laboratoryName: 'Laboratório de Informática',
+      teacherName: 'Rafael Nascimento',
+      classGroup: '8º B',
+      subject: 'Ciências',
+      periodIds: ['P06', 'P07'],
+      periodLabels: ['1ª aula', '2ª aula'],
+      knowledgeObjects: 'Sistema solar e modelos astronômicos',
+      itemsUsed: 'Computadores e projetor',
+      notes: '',
+      createdAt,
+    },
+  ];
+}
 
 const clone = <T>(value: T): T => structuredClone(value);
 
 export interface MockBackendOptions {
   latencyMs?: number;
   failBootstrap?: boolean;
+  periods?: ClassPeriod[];
+  initialReservations?: Reservation[];
+  configuration?: AdminConfiguration;
+  sourceSpreadsheetFingerprint?: string;
 }
 
-export class MockBackend implements BackendClient {
+export class MockBackend implements BackendClient, AdminConfigurationClient {
   private readonly latencyMs: number;
   private readonly failBootstrap: boolean;
+  private readonly sourceSpreadsheetFingerprint: string;
+  private school: School;
+  private laboratories: Laboratory[];
+  private periods: ClassPeriod[];
+  private shifts: ShiftConfiguration[];
+  private classGroups: ConfiguredClassGroup[];
+  private subjects: ConfiguredSubject[];
+  private resources: ConfiguredResource[];
+  private bookingForm: BookingFormConfiguration;
+  private laboratorySettings: LaboratoryAdminConfiguration[];
+  private sedSc: SedScConfiguration;
+  private configurationRevision: string;
+  private configurationRevisionNumber = 1;
   private readonly reservations: Reservation[];
-  private reservationSequence = 43;
+  private reservationSequence = 5;
 
   constructor(options: MockBackendOptions = {}) {
-    this.latencyMs = options.latencyMs ?? 220;
+    this.latencyMs = options.latencyMs ?? 180;
     this.failBootstrap = options.failBootstrap ?? false;
-    this.reservations = clone(initialReservations);
+    this.sourceSpreadsheetFingerprint =
+      options.sourceSpreadsheetFingerprint ??
+      'sha256-v1:0000000000000000000000000000000000000000000000000000000000000000';
+    const suppliedConfiguration = options.configuration;
+    this.school = clone(suppliedConfiguration?.school ?? defaultSchool);
+    this.laboratories = clone(suppliedConfiguration?.laboratories ?? defaultLaboratories);
+    this.shifts = clone([
+      ...(suppliedConfiguration?.shifts ??
+        (options.periods ? deriveShiftConfigurations(options.periods) : DEFAULT_SHIFTS)),
+    ]);
+    this.classGroups = clone([...(suppliedConfiguration?.classGroups ?? DEFAULT_CLASS_GROUPS)]);
+    this.subjects = clone([...(suppliedConfiguration?.subjects ?? DEFAULT_SUBJECTS)]);
+    this.resources = clone([...(suppliedConfiguration?.resources ?? DEFAULT_RESOURCES)]);
+    this.bookingForm = clone(
+      suppliedConfiguration?.bookingForm ?? DEFAULT_BOOKING_FORM_CONFIGURATION,
+    );
+    this.laboratorySettings = this.laboratories.map((laboratory) =>
+      clone(
+        suppliedConfiguration?.laboratorySettings?.find(
+          (settings) => settings.laboratoryId === laboratory.id,
+        ) ?? createDefaultLaboratoryAdminConfiguration(laboratory.id),
+      ),
+    );
+    this.sedSc = clone(suppliedConfiguration?.sedSc ?? DEFAULT_SED_SC_CONFIGURATION);
+    this.configurationRevision = suppliedConfiguration?.revision ?? 'configuration-1';
+    this.periods = clone(
+      options.periods ??
+        (suppliedConfiguration
+          ? createClassPeriods(suppliedConfiguration.shifts, defaultPeriods)
+          : defaultPeriods),
+    );
+    this.reservations = clone(
+      options.initialReservations ??
+        (options.periods || suppliedConfiguration ? [] : createInitialReservations()),
+    );
   }
 
   private async wait(): Promise<void> {
@@ -221,91 +219,81 @@ export class MockBackend implements BackendClient {
       );
     }
 
-    const requestedLaboratory = laboratories.some(
+    const requestedLaboratory = this.laboratories.some(
       (laboratory) => laboratory.id === params.preselectedLaboratoryId && laboratory.active,
     )
       ? params.preselectedLaboratoryId
       : undefined;
 
     const result: BootstrapData = {
-      setupCompleted: true,
-      school: clone(school),
-      laboratories: clone(laboratories.filter((laboratory) => laboratory.active)),
-      resources: clone(resources.filter((resource) => resource.active)),
-      shifts: clone(shifts.filter((shift) => shift.active)),
-      periods: clone(periods.filter((period) => period.active)),
-      reservationRules: {
-        preventConflicts: true,
-        allowSharing: true,
-        validateCapacity: true,
-        allowRecurrence: true,
-        minimumAdvanceHours: 2,
-        maximumAdvanceDays: 120,
-        allowCancellation: true,
-        cancellationDeadlineHours: 12,
-        requireIdentification: true,
-      },
-      notices: [
-        {
-          id: 'NOTICE01',
-          title: 'Planejamento do semestre',
-          message: 'As reservas para agosto já estão abertas para todos os professores.',
-          tone: 'info',
-        },
-        {
-          id: 'NOTICE02',
-          title: 'Laboratório de Ciências',
-          message: 'O espaço está em manutenção preventiva durante esta semana.',
-          tone: 'warning',
-        },
-      ],
-      currentUser: {
-        id: 'TEACHER01',
-        name: 'Ana Paula Ribeiro',
-        email: 'ana.ribeiro@horizontedosaber.edu.br',
-        role: 'TEACHER',
-        authenticationMode: 'INSTITUTIONAL',
-      },
+      school: clone(this.school),
+      laboratories: clone(this.laboratories.filter((laboratory) => laboratory.active)),
+      periods: clone(sortClassPeriods(this.periods.filter((period) => period.active))),
+      classGroups: clone(
+        this.classGroups
+          .filter((classGroup) => classGroup.active)
+          .toSorted((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
+      ),
+      subjects: clone(
+        this.subjects
+          .filter((subject) => subject.active)
+          .toSorted((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
+      ),
+      resources: clone(
+        this.resources
+          .filter((resource) => resource.active)
+          .toSorted((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
+      ),
+      bookingForm: clone(this.bookingForm),
+      configurationRevision: this.configurationRevision,
+      sourceSpreadsheetFingerprint: this.sourceSpreadsheetFingerprint,
     };
 
     if (requestedLaboratory) {
       result.preselectedLaboratoryId = requestedLaboratory;
     }
+
     return result;
   }
 
   async getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse> {
     await this.wait();
-    const laboratory = laboratories.find(
+    if (!isValidIsoDate(request.date)) {
+      throw new BackendError('VALIDATION_ERROR', 'Informe uma data válida.');
+    }
+
+    const laboratory = this.laboratories.find(
       (candidate) => candidate.id === request.laboratoryId && candidate.active,
     );
     if (!laboratory) {
       throw new BackendError('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');
     }
 
-    const isMaintenance = laboratory.status === 'MAINTENANCE';
-    const mappedPeriods = periods.map((period, index) => {
-      const isUnavailable = isMaintenance || (laboratory.id === 'LAB01' && index === 2);
-      const isPartial = !isUnavailable && laboratory.id === 'LAB02' && (index === 1 || index === 3);
-      const occupiedCapacity = isUnavailable
-        ? laboratory.capacity
-        : isPartial
-          ? Math.ceil(laboratory.capacity * 0.5)
-          : 0;
+    const mappedPeriods = getApplicableClassPeriods(this.periods, request.date).map((period) => {
+      const reservation = this.reservations.find(
+        (candidate) =>
+          candidate.laboratoryId === request.laboratoryId &&
+          candidate.date === request.date &&
+          candidate.periodIds.includes(period.id),
+      );
 
       return {
         periodId: period.id,
+        shiftId: period.shiftId,
+        shiftName: period.shiftName,
+        shiftOrder: period.shiftOrder,
+        classNumber: period.classNumber,
         label: period.name,
         startTime: period.startTime,
         endTime: period.endTime,
-        status: isUnavailable
-          ? ('UNAVAILABLE' as const)
-          : isPartial
-            ? ('PARTIAL' as const)
-            : ('AVAILABLE' as const),
-        occupiedCapacity,
-        availableCapacity: Math.max(0, laboratory.capacity - occupiedCapacity),
-        activeReservations: isUnavailable || isPartial ? 1 : 0,
+        status: reservation ? ('UNAVAILABLE' as const) : ('AVAILABLE' as const),
+        ...(reservation
+          ? {
+              reservation: {
+                id: reservation.id,
+              },
+            }
+          : {}),
       };
     });
 
@@ -314,125 +302,195 @@ export class MockBackend implements BackendClient {
 
   async createReservation(request: CreateReservationRequest): Promise<Reservation> {
     await this.wait();
-    const laboratory = laboratories.find(
+    const laboratory = this.laboratories.find(
       (candidate) => candidate.id === request.laboratoryId && candidate.active,
     );
-    const teacher = teachers.find(
-      (candidate) => candidate.id === request.teacherId && candidate.active,
-    );
-
     if (!laboratory) {
       throw new BackendError('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');
     }
-    if (teacher?.email !== request.teacherEmail) {
-      throw new BackendError('UNAUTHORIZED', 'Professor não autorizado para realizar reservas.');
+
+    if (!isValidIsoDate(request.date)) {
+      throw new BackendError('VALIDATION_ERROR', 'Informe uma data válida.');
     }
-    if (request.studentCount > laboratory.capacity) {
-      throw new BackendError(
-        'CAPACITY_EXCEEDED',
-        `A capacidade máxima deste laboratório é de ${laboratory.capacity} pessoas.`,
-      );
+
+    const selectedPeriods = getApplicableClassPeriods(this.periods, request.date).filter((period) =>
+      request.periodIds.includes(period.id),
+    );
+    if (selectedPeriods.length !== request.periodIds.length || selectedPeriods.length === 0) {
+      throw new BackendError('VALIDATION_ERROR', 'Selecione pelo menos uma aula válida.');
     }
 
     const availability = await this.getAvailability({
       laboratoryId: request.laboratoryId,
       date: request.date,
     });
-    const unavailablePeriod = request.periodIds.some((periodId) =>
+    const hasConflict = request.periodIds.some((periodId) =>
       availability.periods.some(
         (period) => period.periodId === periodId && period.status === 'UNAVAILABLE',
       ),
     );
-    if (unavailablePeriod) {
+    if (hasConflict) {
       throw new BackendError(
         'TIME_CONFLICT',
         'Um dos horários selecionados não está mais disponível.',
       );
     }
 
-    const selectedPeriods = periods.filter((period) => request.periodIds.includes(period.id));
-    const selectedResources = request.resources.map((selection) => {
-      const resource = resources.find((candidate) => candidate.id === selection.resourceId);
-      if (!resource) {
-        throw new BackendError('RESOURCE_NOT_FOUND', 'Um dos materiais não foi encontrado.');
-      }
-      if (selection.quantity > resource.availableQuantity) {
-        throw new BackendError(
-          'RESOURCE_UNAVAILABLE',
-          `Há somente ${resource.availableQuantity} unidade(s) de ${resource.name} disponível(is).`,
-        );
-      }
-      return {
-        resourceId: resource.id,
-        resourceName: resource.name,
-        quantity: selection.quantity,
-      };
-    });
-
     const reservation: Reservation = {
       id: `RES-2026-${String(this.reservationSequence).padStart(4, '0')}`,
-      status: 'ACTIVE',
       date: request.date,
       laboratoryId: laboratory.id,
       laboratoryName: laboratory.name,
-      teacherId: teacher.id,
-      teacherName: teacher.name,
-      teacherEmail: teacher.email,
-      classGroup: request.classGroup.trim(),
+      teacherName: request.teacherName.trim(),
       subject: request.subject.trim(),
-      purpose: request.purpose.trim(),
-      studentCount: request.studentCount,
+      classGroup: request.classGroup.trim(),
       periodIds: selectedPeriods.map((period) => period.id),
       periodLabels: selectedPeriods.map((period) => period.name),
-      resources: selectedResources,
+      knowledgeObjects: request.knowledgeObjects.trim(),
+      itemsUsed: request.itemsUsed.trim(),
       notes: request.notes.trim(),
       createdAt: new Date().toISOString(),
-      calendarStatus: 'DISABLED',
     };
+
     this.reservationSequence += 1;
     this.reservations.unshift(reservation);
     return clone(reservation);
   }
 
-  async cancelReservation(reservationId: string): Promise<void> {
+  async getAdminConfiguration(): Promise<AdminConfiguration> {
     await this.wait();
-    const reservation = this.reservations.find((candidate) => candidate.id === reservationId);
-    if (!reservation) {
-      throw new BackendError('RESERVATION_NOT_FOUND', 'Reserva não encontrada.');
+    if (this.failBootstrap) {
+      throw new BackendError(
+        'BACKEND_UNAVAILABLE',
+        'Não foi possível carregar as configurações da escola.',
+      );
     }
-    reservation.status = 'CANCELLED';
+
+    return clone({
+      revision: this.configurationRevision,
+      school: this.school,
+      laboratories: this.laboratories,
+      shifts: this.shifts,
+      classGroups: this.classGroups,
+      subjects: this.subjects,
+      resources: this.resources,
+      bookingForm: this.bookingForm,
+      laboratorySettings: this.laboratorySettings,
+      sedSc: this.sedSc,
+    });
   }
 
-  async getReservation(reservationId: string): Promise<Reservation> {
+  async saveAdminConfiguration(
+    request: SaveAdminConfigurationRequest,
+  ): Promise<AdminConfiguration> {
     await this.wait();
-    const reservation = this.reservations.find((candidate) => candidate.id === reservationId);
-    if (!reservation) {
-      throw new BackendError('RESERVATION_NOT_FOUND', 'Reserva não encontrada.');
+    if (this.failBootstrap) {
+      throw new BackendError(
+        'BACKEND_UNAVAILABLE',
+        'Não foi possível salvar as configurações da escola.',
+      );
     }
-    return clone(reservation);
-  }
+    if (request.expectedRevision !== this.configurationRevision) {
+      throw new BackendError(
+        'CONFIGURATION_CONFLICT',
+        'As configurações foram alteradas em outra tela. Recarregue antes de salvar novamente.',
+      );
+    }
 
-  async getMyReservations(userId = 'TEACHER01'): Promise<Reservation[]> {
-    await this.wait();
-    return clone(this.reservations.filter((reservation) => reservation.teacherId === userId));
-  }
+    const normalized = normalizeConfiguration(request.configuration);
+    const issues = validateAdminConfiguration(normalized);
+    if (issues.length > 0) {
+      throw new BackendError(
+        'VALIDATION_ERROR',
+        'Revise os campos indicados antes de salvar.',
+        issues,
+      );
+    }
 
-  async getAdminData(): Promise<AdminData> {
-    await this.wait();
-    return {
-      school: clone(school),
-      laboratories: clone(laboratories),
-      resources: clone(resources),
-      teachers: clone(teachers),
-      activeReservations: this.reservations.filter((reservation) => reservation.status === 'ACTIVE')
-        .length,
-      pendingCalendarSynchronizations: this.reservations.filter(
-        (reservation) => reservation.calendarStatus === 'PENDING',
-      ).length,
-    };
-  }
+    const generatedPeriods = createClassPeriods(normalized.shifts, this.periods);
+    this.school = clone(normalized.school);
+    this.laboratories = clone(normalized.laboratories);
+    this.shifts = clone(normalized.shifts);
+    this.classGroups = clone(normalized.classGroups);
+    this.subjects = clone(normalized.subjects);
+    this.resources = clone(normalized.resources);
+    this.bookingForm = clone(normalized.bookingForm);
+    this.laboratorySettings = clone(normalized.laboratorySettings);
+    this.sedSc = clone(normalized.sedSc);
+    this.periods = clone(generatedPeriods);
+    this.configurationRevisionNumber += 1;
+    this.configurationRevision = `configuration-${this.configurationRevisionNumber}`;
 
-  async saveInitialSetup(): Promise<void> {
-    await this.wait();
+    return clone({
+      revision: this.configurationRevision,
+      school: this.school,
+      laboratories: this.laboratories,
+      shifts: this.shifts,
+      classGroups: this.classGroups,
+      subjects: this.subjects,
+      resources: this.resources,
+      bookingForm: this.bookingForm,
+      laboratorySettings: this.laboratorySettings,
+      sedSc: this.sedSc,
+    });
   }
+}
+
+function normalizeConfiguration(configuration: AdminConfigurationDraft): AdminConfigurationDraft {
+  const byOrderAndId = <T extends { order: number; id: string }>(left: T, right: T) =>
+    left.order - right.order || left.id.localeCompare(right.id);
+
+  return {
+    school: { ...configuration.school, name: configuration.school.name.trim() },
+    laboratories: configuration.laboratories.map((laboratory) => ({
+      ...laboratory,
+      name: laboratory.name.trim(),
+    })),
+    shifts: configuration.shifts.toSorted(byOrderAndId).map((shift, index) => ({
+      ...shift,
+      name: shift.name.trim(),
+      order: index + 1,
+      activeWeekdays: [...shift.activeWeekdays].toSorted((left, right) => left - right),
+    })),
+    classGroups: configuration.classGroups.toSorted(byOrderAndId).map((classGroup, index) => ({
+      ...classGroup,
+      label: classGroup.label.trim(),
+      order: index + 1,
+    })),
+    subjects: configuration.subjects.toSorted(byOrderAndId).map((subject, index) => ({
+      ...subject,
+      label: subject.label.trim(),
+      order: index + 1,
+    })),
+    resources: configuration.resources.toSorted(byOrderAndId).map((resource, index) => ({
+      ...resource,
+      label: resource.label.trim(),
+      order: index + 1,
+    })),
+    bookingForm: {
+      showObservations: configuration.bookingForm.showObservations,
+    },
+    laboratorySettings: configuration.laboratories.map((laboratory) => {
+      const settings =
+        configuration.laboratorySettings.find(
+          (candidate) => candidate.laboratoryId === laboratory.id,
+        ) ?? createDefaultLaboratoryAdminConfiguration(laboratory.id);
+      return {
+        ...settings,
+        laboratoryId: laboratory.id,
+        responsibleName: settings.responsibleName.trim(),
+        responsibleEmail: settings.responsibleEmail.trim(),
+        googleChatSpaceName: settings.googleChatSpaceName.trim(),
+      };
+    }),
+    sedSc: {
+      enabled: configuration.sedSc.enabled,
+      formUrl: configuration.sedSc.formUrl.trim(),
+      regionalName: configuration.sedSc.regionalName.trim(),
+      municipalityName: configuration.sedSc.municipalityName.trim(),
+      officialSchoolName: configuration.sedSc.officialSchoolName.trim(),
+      defaultArea: configuration.sedSc.defaultArea.trim(),
+      defaultActivityType: configuration.sedSc.defaultActivityType.trim(),
+    },
+  };
 }

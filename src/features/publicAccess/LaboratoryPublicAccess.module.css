@@ -1,0 +1,115 @@
+.card {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-block-end: var(--space-5);
+}
+
+.header h3 {
+  margin-block-end: var(--space-1);
+  font-size: var(--font-size-lg);
+}
+
+.header p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-brand-700);
+  border-radius: var(--radius-md);
+  background: var(--color-brand-100);
+}
+
+.content {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.qrCode {
+  width: 13rem;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.qrCode svg {
+  width: 100%;
+  height: auto;
+}
+
+.linkArea {
+  min-width: 0;
+}
+
+.linkLabel {
+  display: block;
+  margin-block-end: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.linkInput {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--font-size-sm);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-3);
+}
+
+.feedback,
+.error {
+  margin-block: var(--space-3) 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.feedback {
+  color: var(--color-success);
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+@media (max-width: 42rem) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+
+  .qrCode {
+    width: min(100%, 13rem);
+    justify-self: center;
+  }
+
+  .actions > * {
+    flex: 1 1 9rem;
+  }
+}

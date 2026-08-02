@@ -1,0 +1,66 @@
+.page {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  padding: var(--space-4);
+}
+
+.card {
+  width: min(100%, 28rem);
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.eyebrow {
+  margin-block-end: var(--space-2);
+  color: var(--color-brand-700);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.card h1 {
+  margin-block-end: var(--space-3);
+  font-size: var(--font-size-2xl);
+}
+
+.description {
+  margin-block-end: var(--space-5);
+  color: var(--color-text-muted);
+}
+
+.loginButton {
+  margin-block-start: var(--space-5);
+}
+
+.newSchoolButton {
+  margin-block-start: var(--space-3);
+}
+
+.spreadsheetChoices {
+  display: grid;
+  gap: var(--space-3);
+  margin-block-start: var(--space-5);
+}
+
+.note {
+  margin: var(--space-4) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+@media (min-width: 36rem) {
+  .page {
+    padding: var(--space-8);
+  }
+
+  .card {
+    padding: var(--space-8);
+  }
+}
