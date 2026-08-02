@@ -502,7 +502,7 @@ export function ManagerPage() {
           onClick={leaveManager}
         >
           <ArrowLeft size={18} aria-hidden="true" />
-          Voltar para a agenda
+          Voltar ao início
         </Link>
         <div className={styles.titleRow}>
           <div>

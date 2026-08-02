@@ -1,19 +1,21 @@
-# Arquitetura da agenda e do gerenciador
+# Arquitetura da landing, da agenda e do gerenciador
 
 ## Princípios
 
-1. A agenda semanal é a tela inicial e não depende de dashboard.
-2. Na área pública, o laboratório vem do parâmetro `lab` do link; o professor não vê seleção administrativa.
-3. O professor navega apenas entre a agenda e o formulário de agendamento.
-4. A visualização é uma matriz temporal: dias em colunas e períodos em linhas, no desktop e no celular.
-5. Datas usam strings ISO (`YYYY-MM-DD`) sem conversão UTC implícita.
-6. A agenda e o formulário do professor não conhecem detalhes de Google Sheets; o gerenciador delega a sincronização a uma integração isolada.
-7. O gerenciador usa rotas próprias e aparece na agenda somente como um acesso secundário discreto para o laboratorista, sem criar menu administrativo.
+1. A raiz sem contexto público apresenta o projeto e conduz o laboratorista à autorização Google; ela não carrega dados de escola.
+2. A raiz com `school` ou `lab` no link mantém a agenda semanal como entrada direta do professor, inclusive para links e QR Codes já gerados.
+3. Na área pública, o laboratório vem do parâmetro `lab` do link; o professor não vê seleção administrativa.
+4. O professor navega apenas entre a agenda e o formulário de agendamento.
+5. A visualização é uma matriz temporal: dias em colunas e períodos em linhas, no desktop e no celular.
+6. Datas usam strings ISO (`YYYY-MM-DD`) sem conversão UTC implícita.
+7. A agenda e o formulário do professor não conhecem detalhes de Google Sheets; o gerenciador delega a sincronização a uma integração isolada.
+8. O gerenciador usa rotas próprias e aparece na agenda somente como um acesso secundário discreto para o laboratorista, sem criar menu administrativo.
 
 ## Rotas
 
 ```text
-/          agenda de segunda a sexta
+/ sem school/lab          landing page de apresentação
+/?school=...&lab=...      agenda de segunda a sexta
 /agendar   formulário único de agendamento
 /gerenciar/entrar         autorização Google com GIS
 /gerenciar/geral          escola e laboratórios
@@ -22,14 +24,15 @@
 /gerenciar/turmas         turmas e quantidade de estudantes
 /gerenciar/disciplinas    catálogo de disciplinas
 /gerenciar/formulario     recursos e campos opcionais
-*          redirecionamento para a agenda
+*          redirecionamento para a landing page
 ```
 
-O painel é acessado diretamente por `/gerenciar` ou pelo pequeno link da agenda para `/gerenciar/geral`. Sem um access token em memória, suas rotas protegidas encaminham para `/gerenciar/entrar`; depois da autorização e da escolha da escola, o fluxo retorna à seção solicitada ou à seção Geral. O formulário de agendamento não oferece acesso administrativo. A autorização OAuth limita o acesso aos arquivos criados ou abertos com o aplicativo, mas não substitui a futura autenticação administrativa.
+Como a aplicação usa `HashRouter`, esses caminhos aparecem publicamente depois de `#/`. Os botões de acesso da landing page levam diretamente a `/gerenciar/entrar`. O painel também pode ser acessado por `/gerenciar` ou pelo pequeno link da agenda para `/gerenciar/geral`; sem um access token em memória, suas rotas protegidas encaminham para a entrada e, depois da autorização e da escolha da escola, o fluxo retorna à seção solicitada ou à seção Geral. O formulário de agendamento não oferece acesso administrativo. A autorização OAuth limita o acesso aos arquivos criados ou abertos com o aplicativo, mas não substitui a futura autenticação administrativa.
 
 ## Fluxo de dados
 
 ```text
+LandingPage ────────────── sem acesso ao backend público
 WeeklySchedulePage ── getAvailability(data × 5) ─┐
                                                  ├─ BackendClient ─ Apps Script ─ Google Sheets
 BookingPage ──────── createReservation ──────────┘
@@ -40,7 +43,7 @@ ManagerPage ──────── configurações e cancelamentos
              └─ Google Sheets API ─ leitura, escrita e validação
 ```
 
-O `BootstrapProvider` carrega escola, laboratórios, períodos, turmas, disciplinas, recursos, opções do formulário e a revisão da configuração. Reservas não fazem parte do bootstrap; a agenda consulta cada dia da semana e descarta respostas obsoletas quando o professor muda de semana. Depois de salvar no gerenciador, `reload()` renova essa projeção pública.
+O `BootstrapProvider` não consulta o backend público na landing page nem nas rotas do gerenciador. Ele carrega escola, laboratórios, períodos, turmas, disciplinas, recursos, opções do formulário e a revisão da configuração somente quando a raiz contém contexto público ou quando o formulário de agendamento é aberto. Reservas não fazem parte do bootstrap; a agenda consulta cada dia da semana e descarta respostas obsoletas quando o professor muda de semana. Depois de salvar no gerenciador, `reload()` renova essa projeção pública.
 
 Sem uma data explícita, a agenda usa a semana vigente entre segunda e sexta e avança para a semana seguinte no sábado e no domingo. Essa mesma referência controla o botão **Hoje** e seu estado desabilitado. `reservationDate` recebido no estado da rota e `date` recebido na URL têm prioridade, garantindo que retornos de agendamento e links profundos não sejam substituídos pela regra automática.
 
@@ -86,6 +89,7 @@ Ao confirmar:
 ## Responsabilidades
 
 - `app/`: bootstrap, foco e rotas públicas e gerenciais;
+- `pages/LandingPage`: apresentação do projeto e entrada do laboratorista;
 - `pages/WeeklySchedulePage`: dados, laboratório e navegação da semana;
 - `features/calendar`: grade temporal, mesclagem de eventos, slots livres e detalhes;
 - `pages/BookingPage`: formulário, disponibilidade da data e confirmação;

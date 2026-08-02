@@ -286,7 +286,7 @@ describe('painel do gerenciador', () => {
     const user = userEvent.setup();
     const client = new MockBackend({ latencyMs: 0 });
 
-    renderApp('/gerenciar/geral', client);
+    const rendered = renderApp('/gerenciar/geral', client);
 
     const schoolName = await screen.findByLabelText('Nome da escola');
     await user.clear(schoolName);
@@ -302,7 +302,8 @@ describe('painel do gerenciador', () => {
       school: { name: 'Escola Estadual Horizonte' },
     });
 
-    await user.click(screen.getByRole('link', { name: 'Voltar para a agenda' }));
+    rendered.unmount();
+    renderApp('/?school=SCHOOL-DEMO&lab=LAB01', client);
     expect(await screen.findByText('Escola Estadual Horizonte')).toBeInTheDocument();
   });
 
@@ -523,7 +524,7 @@ describe('painel do gerenciador', () => {
   it('expõe somente um acesso discreto ao gerenciador na agenda pública', async () => {
     const client = new MockBackend({ latencyMs: 0 });
 
-    renderApp('/', client);
+    renderApp('/?school=SCHOOL-DEMO&lab=LAB01', client);
 
     expect(
       await screen.findByRole('heading', { name: 'Laboratório de Informática', level: 1 }),
@@ -749,7 +750,7 @@ describe('painel do gerenciador', () => {
 
     const schoolName = await screen.findByLabelText('Nome da escola');
     await user.type(schoolName, ' alterada');
-    await user.click(screen.getByRole('link', { name: 'Voltar para a agenda' }));
+    await user.click(screen.getByRole('link', { name: 'Voltar ao início' }));
 
     expect(confirm).toHaveBeenCalledWith('Sair sem salvar? O rascunho atual será descartado.');
     expect(screen.getByRole('heading', { name: 'Painel do gerenciador' })).toBeInTheDocument();

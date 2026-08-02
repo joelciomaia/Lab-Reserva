@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom';
 import { backendClient } from '../services/backend';
 import type { AppError, BackendClient, BootstrapData, BootstrapParams } from '../types';
 import { getFriendlyError } from '../types';
+import { getPublicAgendaContext, hasPublicAgendaContext } from './publicAgendaContext';
 
 interface BootstrapContextValue {
   data: BootstrapData | null;
@@ -28,27 +29,20 @@ function normalizedPublicParameter(value: string | null | undefined): string | u
   return normalized;
 }
 
-function getPreselectedLaboratoryId(searchParameters: URLSearchParams): string | undefined {
-  return (
-    normalizedPublicParameter(searchParameters.get('lab')) ??
-    normalizedPublicParameter(new URLSearchParams(window.location.search).get('lab')) ??
-    normalizedPublicParameter(window.APP_BOOTSTRAP?.preselectedLaboratoryId)
-  );
-}
-
-function getPublicSchoolId(searchParameters: URLSearchParams): string | undefined {
-  return (
-    normalizedPublicParameter(searchParameters.get('school')) ??
-    normalizedPublicParameter(new URLSearchParams(window.location.search).get('school'))
-  );
-}
-
 export function BootstrapProvider({ children, client = backendClient }: BootstrapProviderProps) {
   const location = useLocation();
   const isManagerRoute = location.pathname.startsWith('/gerenciar');
-  const publicParameters = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const publicSchoolId = getPublicSchoolId(publicParameters);
-  const preselectedLaboratoryId = getPreselectedLaboratoryId(publicParameters);
+  const explicitPublicContext = useMemo(
+    () => getPublicAgendaContext(location.search, window.location.search),
+    [location.search],
+  );
+  const publicSchoolId = explicitPublicContext.schoolId;
+  const preselectedLaboratoryId =
+    explicitPublicContext.laboratoryId ??
+    normalizedPublicParameter(window.APP_BOOTSTRAP?.preselectedLaboratoryId);
+  const shouldLoadPublicData =
+    location.pathname === '/agendar' ||
+    (location.pathname === '/' && hasPublicAgendaContext(location.search, window.location.search));
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
@@ -61,7 +55,7 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
   }, []);
 
   useEffect(() => {
-    if (isManagerRoute) {
+    if (isManagerRoute || !shouldLoadPublicData) {
       return;
     }
 
@@ -101,17 +95,24 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
     return () => {
       isCurrentRequest = false;
     };
-  }, [client, isManagerRoute, preselectedLaboratoryId, publicSchoolId, requestVersion]);
+  }, [
+    client,
+    isManagerRoute,
+    preselectedLaboratoryId,
+    publicSchoolId,
+    requestVersion,
+    shouldLoadPublicData,
+  ]);
 
   const value = useMemo(
     () => ({
-      data: isManagerRoute ? null : data,
+      data: isManagerRoute || !shouldLoadPublicData ? null : data,
       client,
-      isLoading: isManagerRoute ? false : isLoading,
-      error: isManagerRoute ? null : error,
+      isLoading: isManagerRoute || !shouldLoadPublicData ? false : isLoading,
+      error: isManagerRoute || !shouldLoadPublicData ? null : error,
       reload,
     }),
-    [client, data, error, isLoading, isManagerRoute, reload],
+    [client, data, error, isLoading, isManagerRoute, reload, shouldLoadPublicData],
   );
 
   return <BootstrapContext.Provider value={value}>{children}</BootstrapContext.Provider>;

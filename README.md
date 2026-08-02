@@ -1,10 +1,12 @@
 # Lab Reserva
 
-MVP mobile-first para o professor consultar a semana de um laboratório escolar e fazer um agendamento sem passar por dashboard ou menus.
+Aplicação mobile-first para apresentar o Lab Reserva, iniciar a configuração de cada escola e permitir que professores consultem e reservem laboratórios sem passar por dashboard ou menus.
 
 ## Fluxo disponível
 
-Ao abrir o link, a aplicação mostra diretamente:
+A raiz da aplicação sem contexto público (`#/`) apresenta a proposta do Lab Reserva e oferece ao laboratorista o botão para iniciar a configuração em `/gerenciar/entrar`. O acesso não carrega dados de nenhuma escola até que uma conta seja autorizada ou um link público seja aberto.
+
+Quando o endereço contém os parâmetros `school` e `lab`, como nos links e QR Codes gerados pelo painel, a mesma raiz abre diretamente:
 
 - escola e laboratório vinculados ao link;
 - semana atual, com navegação para a semana anterior ou seguinte;
@@ -22,7 +24,7 @@ Os períodos são dados do backend, não valores fixos da interface. O mesmo lay
 
 Sem uma configuração real publicada, a agenda apresenta um erro explícito. Dados demonstrativos nunca são usados como fallback em produção.
 
-O painel do gerenciador fica em `/gerenciar`, separado da experiência do professor. A agenda pública mostra apenas um acesso secundário e discreto para o laboratorista; o fluxo principal do professor continua restrito à semana e ao agendamento. O painel permite configurar:
+O painel do gerenciador fica em `/gerenciar`, separado da experiência do professor. A landing page oferece o ponto de partida em `/gerenciar/entrar`, enquanto a agenda pública mantém apenas um acesso secundário e discreto para o laboratorista; o fluxo principal do professor continua restrito à semana e ao agendamento. O painel permite configurar:
 
 - nome da escola e laboratórios ativos;
 - turnos, dias da semana, início, duração, quantidade de aulas e intervalo;
@@ -34,7 +36,7 @@ As alterações são publicadas no Google Sheets. Depois da autorização Google
 
 ## Integração Google para várias escolas
 
-O acesso discreto da agenda aponta para `/gerenciar/geral`. Sem autorização ativa, a rota protegida encaminha para a tela simples `/gerenciar/entrar`; depois do login, retorna ao painel. O botão **Entrar com Google** usa o [token model do Google Identity Services (GIS)](https://developers.google.com/identity/oauth2/web/guides/use-token-model) e solicita um único escopo:
+Os botões principais da landing page apontam diretamente para `/gerenciar/entrar`. O acesso discreto da agenda continua apontando para `/gerenciar/geral`; sem autorização ativa, essa rota protegida também encaminha para a tela de entrada e, depois do login, retorna ao painel. O botão **Entrar com Google** usa o [token model do Google Identity Services (GIS)](https://developers.google.com/identity/oauth2/web/guides/use-token-model) e solicita um único escopo:
 
 ```text
 https://www.googleapis.com/auth/drive.file
@@ -117,12 +119,13 @@ O Vite informa o endereço local, normalmente `http://localhost:5173`.
 Links de exemplo:
 
 ```text
+http://localhost:5173/#/
 http://localhost:5173/#/?school=SCHOOL-UUID&lab=LAB02
 http://localhost:5173/#/gerenciar
 http://localhost:5173/#/gerenciar/entrar
 ```
 
-O parâmetro `school` seleciona o workspace público registrado e `lab` escolhe o laboratório correspondente. O ID da planilha não aparece no endereço. Um workspace ou laboratório inexistente produz erro explícito.
+O primeiro endereço abre a landing page. No segundo, o parâmetro `school` seleciona o workspace público registrado e `lab` escolhe o laboratório correspondente, por isso o professor entra diretamente na agenda. O ID da planilha não aparece no endereço. Um workspace ou laboratório inexistente produz erro explícito.
 
 Assim que os dados principais são confirmados no Google Sheets e o vínculo automático com o Web App é validado, a seção **Geral** oferece **Abrir**, **Copiar link** e **Baixar QR Code** em JPG. Links inválidos mostram erro e nunca caem silenciosamente em outra escola ou laboratório.
 
@@ -148,7 +151,8 @@ HashRouter
       │   └── BackendClient
       │       └── AppsScriptBackend → Web App → Google Sheets
       └── rotas
-          ├── /                    → agenda semanal
+          ├── / sem school/lab     → apresentação do projeto
+          ├── / com school/lab     → agenda semanal
           ├── /agendar             → novo agendamento
           ├── /gerenciar/entrar    → autorização Google
           └── /gerenciar/:seção    → configuração do laboratorista
@@ -170,7 +174,8 @@ Mais detalhes: [docs/architecture.md](docs/architecture.md).
 
 A suíte automatizada cobre:
 
-- exibição direta da agenda semanal;
+- exibição da landing page na raiz sem contexto público e sem carregar dados de escola;
+- exibição direta da agenda semanal por links com escola e laboratório;
 - posicionamento e mesclagem de eventos consecutivos;
 - clique em espaço livre com data e aula pré-selecionadas;
 - abertura dos detalhes de uma reserva;

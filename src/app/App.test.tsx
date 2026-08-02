@@ -6,7 +6,10 @@ import { MockBackend } from '../services/mockBackend';
 import { formatWeekRange, getCurrentAgendaReferenceDate, getSchoolWeek } from '../utils/week';
 import { App } from './App';
 
-function renderApp(route = '/', client = new MockBackend({ latencyMs: 0 })) {
+function renderApp(
+  route = '/?school=SCHOOL-DEMO&lab=LAB01',
+  client = new MockBackend({ latencyMs: 0 }),
+) {
   return render(
     <MemoryRouter
       initialEntries={[route]}
@@ -16,6 +19,42 @@ function renderApp(route = '/', client = new MockBackend({ latencyMs: 0 })) {
     </MemoryRouter>,
   );
 }
+
+describe('apresentação do Lab Reserva', () => {
+  it('mostra o ponto de partida sem consultar a agenda pública', async () => {
+    const client = new MockBackend({ latencyMs: 0 });
+    const getBootstrapData = vi.spyOn(client, 'getBootstrapData');
+
+    renderApp('/', client);
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Organize o laboratório. Compartilhe o acesso. Pronto.',
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Uma implantação/i, level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Começar configuração' })).toHaveAttribute(
+      'href',
+      '/gerenciar/entrar',
+    );
+    expect(screen.queryByText(/Não foi possível concluir/i)).not.toBeInTheDocument();
+    expect(getBootstrapData).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.title).toBe('Início | Lab Reserva'));
+  });
+
+  it('leva o laboratorista da apresentação para o login Google', async () => {
+    const user = userEvent.setup();
+    renderApp('/');
+
+    await user.click(await screen.findByRole('link', { name: 'Começar configuração' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Conectar ao Google', level: 1 }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Entrar com Google' })).toBeInTheDocument();
+  });
+});
 
 describe('agenda semanal do professor', () => {
   afterEach(() => {
@@ -64,7 +103,7 @@ describe('agenda semanal do professor', () => {
 
   it('mantém a semana solicitada pelo link e mescla reservas consecutivas', async () => {
     const reservationWeekDate = getSchoolWeek(new Date())[0]!.isoDate;
-    renderApp(`/?date=${reservationWeekDate}`);
+    renderApp(`/?school=SCHOOL-DEMO&lab=LAB01&date=${reservationWeekDate}`);
 
     expect(
       await screen.findByRole('button', {
@@ -77,7 +116,7 @@ describe('agenda semanal do professor', () => {
 
   it('abre um slot livre com laboratório, data e aula pré-selecionados', async () => {
     const user = userEvent.setup();
-    renderApp('/?lab=LAB02');
+    renderApp('/?school=SCHOOL-DEMO&lab=LAB02');
 
     await user.click(await screen.findByRole('button', { name: 'Ver próxima semana' }));
     const freeSlot = (
@@ -133,7 +172,7 @@ describe('agenda semanal do professor', () => {
   });
 
   it('não troca silenciosamente um link inválido pelo primeiro laboratório', async () => {
-    renderApp('/?lab=LAB-INEXISTENTE');
+    renderApp('/?school=SCHOOL-DEMO&lab=LAB-INEXISTENTE');
 
     expect(
       await screen.findByText('Nenhum laboratório foi encontrado para este link.'),
@@ -160,7 +199,7 @@ describe('agenda semanal do professor', () => {
   it('abre os detalhes de uma reserva sem sair da semana', async () => {
     const user = userEvent.setup();
     const reservationWeekDate = getSchoolWeek(new Date())[0]!.isoDate;
-    renderApp(`/?date=${reservationWeekDate}`);
+    renderApp(`/?school=SCHOOL-DEMO&lab=LAB01&date=${reservationWeekDate}`);
 
     await user.click(
       await screen.findByRole('button', {
@@ -177,7 +216,10 @@ describe('agenda semanal do professor', () => {
   });
 
   it('oferece nova tentativa quando a agenda não pode ser carregada', async () => {
-    renderApp('/', new MockBackend({ latencyMs: 0, failBootstrap: true }));
+    renderApp(
+      '/?school=SCHOOL-DEMO&lab=LAB01',
+      new MockBackend({ latencyMs: 0, failBootstrap: true }),
+    );
 
     expect(
       await screen.findByText('Não foi possível carregar os dados da escola.'),
