@@ -144,11 +144,10 @@ function occupyingReservation_(reservations, cancelled, periods, laboratoryId, d
   return null;
 }
 
-function getAvailability_(request) {
+function getAvailability_(school, request) {
   var laboratoryId = requiredText_(request.laboratoryId, 'laboratoryId', 128);
   var date = assertIsoDate_(request.date);
-  var spreadsheet = spreadsheet_();
-  ensureOperationalSheets_(spreadsheet);
+  var spreadsheet = spreadsheetForSchool_(school);
   var configuration = readConfiguration_(spreadsheet);
   if (!activeLaboratory_(configuration, laboratoryId)) {
     throwApiError_('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');
@@ -204,10 +203,10 @@ function validateCreateRequest_(request) {
   };
 }
 
-function createReservation_(rawRequest) {
+function createReservation_(school, rawRequest) {
   var request = validateCreateRequest_(rawRequest);
   return withScriptLock_(function () {
-    var spreadsheet = spreadsheet_();
+    var spreadsheet = spreadsheetForSchool_(school);
     ensureOperationalSheetsUnlocked_(spreadsheet);
     var configuration = readConfiguration_(spreadsheet);
     var laboratory = activeLaboratory_(configuration, request.laboratoryId);

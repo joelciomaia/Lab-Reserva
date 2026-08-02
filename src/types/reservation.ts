@@ -43,6 +43,8 @@ export interface CancelReservationPeriodsRequest {
 }
 
 export interface CreateReservationRequest {
+  /** Opcional apenas para compatibilidade com o backend legado de uma escola. */
+  schoolId?: string;
   laboratoryId: string;
   teacherName: string;
   subject: string;

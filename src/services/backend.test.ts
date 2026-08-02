@@ -19,6 +19,6 @@ describe('createBackendClient', () => {
     await expect(client.getBootstrapData()).rejects.toMatchObject({
       code: 'BACKEND_UNAVAILABLE',
     });
-    await expect(client.getBootstrapData()).rejects.toThrow(/agenda real.*Google Sheets/i);
+    await expect(client.getBootstrapData()).rejects.toThrow(/agenda ainda não está disponível/i);
   });
 });

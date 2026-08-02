@@ -71,7 +71,7 @@ Ao salvar, o backend valida nomes e IDs repetidos, limites numéricos, dias, fim
 Um slot livre navega para:
 
 ```text
-/agendar?lab=LAB01&date=2026-07-22&period=P02
+/agendar?school=SCHOOL-UUID&lab=LAB01&date=2026-07-22&period=P02
 ```
 
 O formulário só aplica o período informado depois de confirmar que ele continua livre.
@@ -152,7 +152,7 @@ Ao autorizar uma nova escola, a integração cria imediatamente `Lab Reserva - N
 
 Cada sincronização substitui somente as seis abas de configuração em um único `spreadsheets.batchUpdate` atômico. Uma falha preserva integralmente a versão anterior. `RESERVAS` e `CANCELAMENTOS` são append-only e nunca são limpas. Planilhas legadas recebem somente as colunas e abas operacionais ausentes, sem regravar linhas existentes.
 
-Após cada escrita, a integração faz um `values.batchGet` das seis abas de configuração e compara as matrizes normalizadas com os dados enviados. A sincronização só é considerada confirmada quando essa releitura valida os valores; diferenças geram uma falha explícita. Confirmada a escrita, o painel libera imediatamente o link e o QR Code do laboratório. O bootstrap público ainda retorna um fingerprint SHA-256 com namespace para diagnóstico do vínculo com o Apps Script, sem expor ID, token ou credencial.
+Após cada escrita, a integração faz um `values.batchGet` das seis abas de configuração e compara as matrizes normalizadas com os dados enviados. A sincronização só é considerada confirmada quando essa releitura valida os valores; diferenças geram uma falha explícita. Em seguida, o frontend consulta a conta efetiva do Web App, concede a ela permissão de edição somente nessa planilha via `drive.file` e registra o par imutável escola–planilha. O link e o QR Code só são liberados quando o fingerprint SHA-256 retornado pelo backend corresponde à planilha sincronizada, sem expor ID, token ou credencial.
 
 Antes da edição, essas mesmas seis abas são lidas, validadas e convertidas em `AdminConfiguration`. A ausência ou invalidade dos dados produz um estado explícito; não existe fallback para valores demonstrativos.
 
@@ -160,10 +160,10 @@ Planilhas legadas sem `RECURSOS` ou sem `EXIBIR_OBSERVACOES` continuam legíveis
 
 ## Backend público
 
-O Web App em `apps-script/` executa como proprietário da planilha configurada em `SPREADSHEET_ID`. Ele expõe somente bootstrap, disponibilidade e criação, usa `LockService` para revalidar conflitos e grava reservas com UUID. A disponibilidade pública retorna apenas a ocupação e o ID técnico da reserva, sem professor, turma ou disciplina. Cancelamentos administrativos usam o token Google do laboratorista e são acrescentados diretamente em `CANCELAMENTOS`; não existe endpoint público de exclusão. A criação pública não possui autenticação ou limitação de taxa nativas e precisa de uma camada antiautomação antes de exposição ampla.
+O Web App em `apps-script/` executa como uma conta central e mantém em Script Properties um registro imutável e reverso entre o ID público da escola e a planilha que foi compartilhada automaticamente com essa conta. Não existe fallback para `SPREADSHEET_ID`. Bootstrap, disponibilidade e criação exigem `school`; a resolução valida o mapa reverso e também `CONFIGURACOES.ID_ESCOLA` antes de abrir os dados. O serviço usa `LockService` para registrar vínculos e revalidar conflitos, e grava reservas com UUID. A disponibilidade pública retorna apenas a ocupação e o ID técnico da reserva, sem professor, turma ou disciplina. Cancelamentos administrativos usam o token Google do laboratorista e são acrescentados diretamente em `CANCELAMENTOS`; não existe endpoint público de exclusão. A criação pública não possui autenticação ou limitação de taxa nativas e precisa de uma camada antiautomação antes de exposição ampla.
 
 O `MockBackend` permanece exclusivamente nos testes por injeção explícita. Sem `VITE_GOOGLE_APPS_SCRIPT_URL`, a aplicação informa que a agenda real ainda não foi conectada.
 
-O salvamento inclui `expectedRevision`. Se outra tela já publicou uma revisão diferente, o backend rejeita a gravação em vez de sobrescrever silenciosamente. Desativação preserva IDs no cadastro; antes do backend real, ainda será necessário definir regras para impedir alterações de horário que afetem reservas futuras.
+O salvamento compara a revisão lida antes de regravar. Se outra tela já publicou uma revisão diferente, a alteração é rejeitada em vez de sobrescrever silenciosamente. Desativação preserva IDs no cadastro; ainda será necessário definir regras para impedir alterações de horário que afetem reservas futuras.
 
-O catálogo padrão do mock demonstra três turnos com cinco aulas cada. Essa quantidade é apenas uma configuração de exemplo e não está codificada nos componentes da interface.
+O catálogo demonstrativo usado pela suíte existe somente no `MockBackend` injetado pelos testes. Nenhum dado desse catálogo é carregado no caminho de produção.

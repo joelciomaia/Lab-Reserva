@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- o provider e seu hook formam uma única API */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
+import { useLocation } from 'react-router-dom';
 import { backendClient } from '../services/backend';
-import type { AppError, BackendClient, BootstrapData } from '../types';
+import type { AppError, BackendClient, BootstrapData, BootstrapParams } from '../types';
 import { getFriendlyError } from '../types';
 
 interface BootstrapContextValue {
@@ -19,17 +20,35 @@ export interface BootstrapProviderProps extends PropsWithChildren {
   client?: BackendClient;
 }
 
-function getPreselectedLaboratoryId(): string | undefined {
-  const injectedValue = window.APP_BOOTSTRAP?.preselectedLaboratoryId;
-  if (injectedValue) {
-    return injectedValue;
+function normalizedPublicParameter(value: string | null | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
   }
+  return normalized;
+}
 
-  const queryValue = new URLSearchParams(window.location.search).get('lab');
-  return queryValue === null || queryValue === '' ? undefined : queryValue;
+function getPreselectedLaboratoryId(searchParameters: URLSearchParams): string | undefined {
+  return (
+    normalizedPublicParameter(searchParameters.get('lab')) ??
+    normalizedPublicParameter(new URLSearchParams(window.location.search).get('lab')) ??
+    normalizedPublicParameter(window.APP_BOOTSTRAP?.preselectedLaboratoryId)
+  );
+}
+
+function getPublicSchoolId(searchParameters: URLSearchParams): string | undefined {
+  return (
+    normalizedPublicParameter(searchParameters.get('school')) ??
+    normalizedPublicParameter(new URLSearchParams(window.location.search).get('school'))
+  );
 }
 
 export function BootstrapProvider({ children, client = backendClient }: BootstrapProviderProps) {
+  const location = useLocation();
+  const isManagerRoute = location.pathname.startsWith('/gerenciar');
+  const publicParameters = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const publicSchoolId = getPublicSchoolId(publicParameters);
+  const preselectedLaboratoryId = getPreselectedLaboratoryId(publicParameters);
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
@@ -42,14 +61,29 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
   }, []);
 
   useEffect(() => {
-    let isCurrentRequest = true;
-    const preselectedLaboratoryId = getPreselectedLaboratoryId();
-    const params = preselectedLaboratoryId ? { preselectedLaboratoryId } : {};
+    if (isManagerRoute) {
+      return;
+    }
 
-    void client
-      .getBootstrapData(params)
+    let isCurrentRequest = true;
+    const params: BootstrapParams = {
+      ...(publicSchoolId ? { schoolId: publicSchoolId } : {}),
+      ...(preselectedLaboratoryId ? { preselectedLaboratoryId } : {}),
+    };
+
+    // A fila assíncrona evita atualizações síncronas de estado dentro do efeito
+    // e também impede que uma rota administrativa dispare o bootstrap público.
+    void Promise.resolve()
+      .then(() => {
+        if (!isCurrentRequest) {
+          return null;
+        }
+        setIsLoading(true);
+        setError(null);
+        return client.getBootstrapData(params);
+      })
       .then((bootstrapData) => {
-        if (isCurrentRequest) {
+        if (isCurrentRequest && bootstrapData) {
           setData(bootstrapData);
         }
       })
@@ -67,11 +101,17 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
     return () => {
       isCurrentRequest = false;
     };
-  }, [client, requestVersion]);
+  }, [client, isManagerRoute, preselectedLaboratoryId, publicSchoolId, requestVersion]);
 
   const value = useMemo(
-    () => ({ data, client, isLoading, error, reload }),
-    [client, data, error, isLoading, reload],
+    () => ({
+      data: isManagerRoute ? null : data,
+      client,
+      isLoading: isManagerRoute ? false : isLoading,
+      error: isManagerRoute ? null : error,
+      reload,
+    }),
+    [client, data, error, isLoading, isManagerRoute, reload],
   );
 
   return <BootstrapContext.Provider value={value}>{children}</BootstrapContext.Provider>;

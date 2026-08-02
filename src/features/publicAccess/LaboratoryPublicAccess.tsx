@@ -8,6 +8,7 @@ import { downloadQrCodeAsJpeg } from './qrCodeDownload';
 import { createQrCodeFileName } from './safeFileName';
 
 export interface LaboratoryPublicAccessProps {
+  schoolId: string;
   laboratoryId: string;
   laboratoryName: string;
   publicAppUrl?: string;
@@ -37,6 +38,7 @@ async function copyText(text: string): Promise<void> {
 }
 
 export function LaboratoryPublicAccess({
+  schoolId,
   laboratoryId,
   laboratoryName,
   publicAppUrl,
@@ -48,8 +50,12 @@ export function LaboratoryPublicAccess({
   const [isDownloading, setIsDownloading] = useState(false);
   const publicUrl = useMemo(
     () =>
-      buildLaboratoryPublicUrl(laboratoryId, publicAppUrl === undefined ? {} : { publicAppUrl }),
-    [laboratoryId, publicAppUrl],
+      buildLaboratoryPublicUrl(
+        schoolId,
+        laboratoryId,
+        publicAppUrl === undefined ? {} : { publicAppUrl },
+      ),
+    [laboratoryId, publicAppUrl, schoolId],
   );
 
   function openPublicSchedule() {

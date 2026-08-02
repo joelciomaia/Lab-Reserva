@@ -308,9 +308,8 @@ function activeLaboratory_(configuration, laboratoryId) {
   return null;
 }
 
-function getBootstrapData_(preselectedLaboratoryId) {
-  var spreadsheet = spreadsheet_();
-  ensureOperationalSheets_(spreadsheet);
+function getBootstrapData_(school, preselectedLaboratoryId) {
+  var spreadsheet = spreadsheetForSchool_(school);
   var configuration = readConfiguration_(spreadsheet);
   var activeLaboratories = configuration.laboratories.filter(function (laboratory) {
     return laboratory.active;

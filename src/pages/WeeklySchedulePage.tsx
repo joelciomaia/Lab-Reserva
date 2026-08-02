@@ -74,7 +74,7 @@ export function WeeklySchedulePage() {
   const weekDays = useMemo(() => getSchoolWeek(referenceDate), [referenceDate]);
   const weekStart = startOfWeek(referenceDate, { weekStartsOn: 1 });
   const weekLabel = formatWeekRange(weekStart);
-  const requestKey = `${laboratory?.id ?? ''}:${weekDays.map((day) => day.isoDate).join(',')}:${requestVersion}`;
+  const requestKey = `${data?.school.id ?? ''}:${laboratory?.id ?? ''}:${weekDays.map((day) => day.isoDate).join(',')}:${requestVersion}`;
   const isLoadingWeek = Boolean(laboratory) && weekRequest.key !== requestKey;
   const weekAvailability = weekRequest.key === requestKey ? weekRequest.data : [];
   const weekError = weekRequest.key === requestKey ? weekRequest.error : null;
@@ -89,7 +89,7 @@ export function WeeklySchedulePage() {
   }, [laboratory]);
 
   useEffect(() => {
-    if (!laboratory) {
+    if (!data || !laboratory) {
       return;
     }
 
@@ -97,7 +97,11 @@ export function WeeklySchedulePage() {
 
     void Promise.all(
       weekDays.map((day) =>
-        client.getAvailability({ laboratoryId: laboratory.id, date: day.isoDate }),
+        client.getAvailability({
+          schoolId: data.school.id,
+          laboratoryId: laboratory.id,
+          date: day.isoDate,
+        }),
       ),
     )
       .then((responses) => {
@@ -114,7 +118,7 @@ export function WeeklySchedulePage() {
     return () => {
       isCurrent = false;
     };
-  }, [client, laboratory, requestKey, weekDays]);
+  }, [client, data, laboratory, requestKey, weekDays]);
 
   if (isBootstrapLoading) {
     return (
@@ -129,12 +133,9 @@ export function WeeklySchedulePage() {
       <div className={styles.statePage}>
         <ErrorMessage
           action={
-            <div className={styles.errorActions}>
-              <Button variant="secondary" onClick={reload}>
-                Tentar novamente
-              </Button>
-              <Button onClick={() => navigate('/gerenciar/entrar')}>Entrar com Google</Button>
-            </div>
+            <Button variant="secondary" onClick={reload}>
+              Tentar novamente
+            </Button>
           }
         >
           {bootstrapError?.message ?? 'Nenhum laboratório foi encontrado para este link.'}
@@ -149,12 +150,12 @@ export function WeeklySchedulePage() {
     getSchoolWeek(addWeeks(new Date(), 1))[0]!.isoDate;
   const suggestedDate = weekDays[0]!.isoDate > today ? weekDays[0]!.isoDate : nextBookableSchoolDay;
   const laboratoryId = laboratory.id;
-  const bookingUrl = `/agendar?lab=${encodeURIComponent(laboratoryId)}&date=${suggestedDate}`;
+  const schoolId = data.school.id;
+  const publicContext = `school=${encodeURIComponent(schoolId)}&lab=${encodeURIComponent(laboratoryId)}`;
+  const bookingUrl = `/agendar?${publicContext}&date=${suggestedDate}`;
 
   function openBooking(date: string, periodId: string) {
-    navigate(
-      `/agendar?lab=${encodeURIComponent(laboratoryId)}&date=${date}&period=${encodeURIComponent(periodId)}`,
-    );
+    navigate(`/agendar?${publicContext}&date=${date}&period=${encodeURIComponent(periodId)}`);
   }
 
   return (

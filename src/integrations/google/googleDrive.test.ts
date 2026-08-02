@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GoogleDriveIntegrationError,
   LAB_RESERVA_SPREADSHEET_APP_PROPERTIES,
+  ensureSpreadsheetWriterAccess,
   getAccessibleSpreadsheet,
   listLabReservaSpreadsheets,
   tagLabReservaSpreadsheet,
@@ -214,5 +215,182 @@ describe('integração de descoberta com Google Drive', () => {
       code: 'DRIVE_API_ERROR',
       status: 403,
     });
+  });
+});
+
+describe('ensureSpreadsheetWriterAccess', () => {
+  it.each([
+    { type: 'user', role: 'writer' as const },
+    { type: 'group', role: 'owner' as const },
+  ])('reutiliza uma permissão $type com papel $role', async ({ type, role }) => {
+    const fetchImplementation = createFetchMock((url, init) => {
+      const parsedUrl = new URL(url);
+      expect(parsedUrl.pathname).toBe('/drive/v3/files/sheet-1/permissions');
+      expect(parsedUrl.searchParams.get('supportsAllDrives')).toBe('true');
+      expect(init?.method).toBeUndefined();
+      return jsonResponse({
+        permissions: [
+          {
+            id: 'permission-existing',
+            type,
+            role,
+            emailAddress: 'backend@example.org',
+          },
+        ],
+      });
+    });
+
+    await expect(
+      ensureSpreadsheetWriterAccess('sheet-1', ' Backend@Example.org ', {
+        accessToken: 'access-token',
+        fetchImplementation,
+      }),
+    ).resolves.toEqual({
+      permissionId: 'permission-existing',
+      writerEmail: 'backend@example.org',
+      role,
+      action: 'existing',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it('promove uma permissão de leitura existente para writer', async () => {
+    const fetchImplementation = createFetchMock((url, init) => {
+      const parsedUrl = new URL(url);
+      if (init?.method === 'PATCH') {
+        expect(parsedUrl.pathname).toBe('/drive/v3/files/sheet-1/permissions/permission-reader');
+        expect(parsedUrl.searchParams.get('supportsAllDrives')).toBe('true');
+        expect(init.headers).toEqual(
+          expect.objectContaining({ Authorization: 'Bearer access-token' }),
+        );
+        if (typeof init.body !== 'string') {
+          throw new Error('O teste esperava um corpo JSON em texto.');
+        }
+        expect(JSON.parse(init.body)).toEqual({ role: 'writer' });
+        return jsonResponse({
+          id: 'permission-reader',
+          type: 'user',
+          role: 'writer',
+          emailAddress: 'backend@example.org',
+        });
+      }
+      return jsonResponse({
+        permissions: [
+          {
+            id: 'permission-reader',
+            type: 'user',
+            role: 'reader',
+            emailAddress: 'backend@example.org',
+          },
+        ],
+      });
+    });
+
+    await expect(
+      ensureSpreadsheetWriterAccess('sheet-1', 'backend@example.org', {
+        accessToken: 'access-token',
+        fetchImplementation,
+      }),
+    ).resolves.toEqual({
+      permissionId: 'permission-reader',
+      writerEmail: 'backend@example.org',
+      role: 'writer',
+      action: 'updated',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('cria uma permissão writer sem enviar e-mail quando a conta ainda não tem acesso', async () => {
+    const fetchImplementation = createFetchMock((url, init) => {
+      const parsedUrl = new URL(url);
+      if (init?.method === 'POST') {
+        expect(parsedUrl.pathname).toBe('/drive/v3/files/sheet-1/permissions');
+        expect(parsedUrl.searchParams.get('sendNotificationEmail')).toBe('false');
+        expect(parsedUrl.searchParams.get('supportsAllDrives')).toBe('true');
+        if (typeof init.body !== 'string') {
+          throw new Error('O teste esperava um corpo JSON em texto.');
+        }
+        expect(JSON.parse(init.body)).toEqual({
+          type: 'user',
+          role: 'writer',
+          emailAddress: 'backend@example.org',
+        });
+        return jsonResponse({
+          id: 'permission-created',
+          type: 'user',
+          role: 'writer',
+          emailAddress: 'backend@example.org',
+        });
+      }
+      return jsonResponse({ permissions: [] });
+    });
+
+    await expect(
+      ensureSpreadsheetWriterAccess('sheet-1', 'backend@example.org', {
+        accessToken: 'access-token',
+        fetchImplementation,
+      }),
+    ).resolves.toEqual({
+      permissionId: 'permission-created',
+      writerEmail: 'backend@example.org',
+      role: 'writer',
+      action: 'created',
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejeita identificador e e-mail inválidos antes de chamar o Drive', async () => {
+    const fetchImplementation = createFetchMock(() => jsonResponse({}));
+
+    await expect(
+      ensureSpreadsheetWriterAccess('sheet/invalid', 'backend@example.org', {
+        accessToken: 'access-token',
+        fetchImplementation,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(
+      ensureSpreadsheetWriterAccess('sheet-valid', 'not-an-email', {
+        accessToken: 'access-token',
+        fetchImplementation,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it('mantém 401 como erro tipado de autorização', async () => {
+    const fetchImplementation = createFetchMock(() => jsonResponse({}, 401));
+
+    await expect(
+      ensureSpreadsheetWriterAccess('sheet-1', 'backend@example.org', {
+        accessToken: 'expired-token',
+        fetchImplementation,
+      }),
+    ).rejects.toMatchObject({
+      code: 'AUTHORIZATION_REQUIRED',
+      status: 401,
+    });
+  });
+
+  it('explica quando a política do Workspace bloqueia o compartilhamento', async () => {
+    const secretAccessToken = 'secret-token-that-must-not-leak';
+    const fetchImplementation = createFetchMock((_url, init) =>
+      init?.method === 'POST' ? jsonResponse({}, 403) : jsonResponse({ permissions: [] }),
+    );
+
+    try {
+      await ensureSpreadsheetWriterAccess('sheet-1', 'backend@example.org', {
+        accessToken: secretAccessToken,
+        fetchImplementation,
+      });
+      expect.fail('O compartilhamento deveria ser rejeitado.');
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(GoogleDriveIntegrationError);
+      if (!(error instanceof GoogleDriveIntegrationError)) {
+        throw error;
+      }
+      expect(error).toMatchObject({ code: 'SHARING_FORBIDDEN', status: 403 });
+      expect(error.message).toContain('política de compartilhamento do Google Workspace');
+      expect(error.message).not.toContain(secretAccessToken);
+    }
   });
 });

@@ -124,7 +124,7 @@ function supportsAdminConfiguration(
 }
 
 function createEmptySchoolConfiguration(): AdminConfiguration {
-  const schoolId = createGeneratedId('SCHOOL');
+  const schoolId = `SCHOOL-${crypto.randomUUID()}`;
 
   return {
     revision: createRevision(),
@@ -220,6 +220,8 @@ export function ManagerPage() {
     cancelReservationPeriods,
     listReservations,
     loadLinkedConfiguration,
+    publicSchoolError,
+    publicSchoolReady,
     spreadsheetId,
     spreadsheetUrl,
     syncConfiguration,
@@ -322,8 +324,13 @@ export function ManagerPage() {
     [draft, savedConfiguration],
   );
   const needsGoogleSync = !spreadsheetId || pendingGoogleSync !== null;
-  const publicLinksEnabled = Boolean(spreadsheetId && !isDirty && !needsGoogleSync);
-  const publicLinksMessage = 'Salve os dados principais para gerar o link e o QR Code.';
+  const publicLinksEnabled = Boolean(
+    spreadsheetId && publicSchoolReady && !isDirty && !needsGoogleSync,
+  );
+  const publicLinksMessage =
+    !publicSchoolReady && spreadsheetId && !isDirty && !pendingGoogleSync
+      ? (publicSchoolError ?? 'Tente novamente para concluir o acesso público desta escola.')
+      : 'Salve os dados principais para gerar o link e o QR Code.';
 
   useEffect(() => {
     if (!isDirty && !pendingGoogleSync) {
@@ -394,11 +401,17 @@ export function ManagerPage() {
           setSavedConfiguration(saved);
           setDraft(toDraft(saved));
         } else {
+          let currentGoogleConfiguration: AdminConfiguration | null = null;
           if (spreadsheetId) {
-            const currentGoogleConfiguration = await loadLinkedConfiguration();
+            currentGoogleConfiguration = await loadLinkedConfiguration();
+            const expectedCurrentRevision =
+              pendingGoogleSync &&
+              currentGoogleConfiguration?.revision === pendingGoogleSync.revision
+                ? pendingGoogleSync.revision
+                : savedConfiguration.revision;
             if (
               currentGoogleConfiguration &&
-              currentGoogleConfiguration.revision !== savedConfiguration.revision
+              currentGoogleConfiguration.revision !== expectedCurrentRevision
             ) {
               throw new BackendError(
                 'CONFIGURATION_CONFLICT',
@@ -406,10 +419,19 @@ export function ManagerPage() {
               );
             }
           }
-          configurationForGoogle = {
-            revision: createRevision(),
-            ...structuredClone(draft),
-          };
+          const pendingConfigurationAlreadyWritten = Boolean(
+            pendingGoogleSync &&
+            currentGoogleConfiguration?.revision === pendingGoogleSync.revision &&
+            JSON.stringify(draft) === JSON.stringify(toDraft(pendingGoogleSync)),
+          );
+          if (pendingConfigurationAlreadyWritten && pendingGoogleSync) {
+            configurationForGoogle = pendingGoogleSync;
+          } else {
+            configurationForGoogle = {
+              revision: createRevision(),
+              ...structuredClone(draft),
+            };
+          }
         }
         setPendingGoogleSync(configurationForGoogle);
       }
@@ -434,7 +456,7 @@ export function ManagerPage() {
             : 'Tente novamente em instantes.';
         setSaveError({
           code: 'BACKEND_UNAVAILABLE',
-          message: `Não foi possível confirmar as alterações no Google Sheets. Os dados anteriores foram preservados. ${message}`,
+          message: `Os agendamentos foram preservados, mas o acesso público ainda não foi confirmado. Tente salvar novamente. ${message}`,
         });
       }
     } catch (error: unknown) {
@@ -850,8 +872,9 @@ function GeneralSection({
                     </label>
                   </div>
 
-                  {laboratory.active && publicLinksEnabled ? (
+                  {laboratory.active && hasMainData && publicLinksEnabled ? (
                     <LaboratoryPublicAccess
+                      schoolId={draft.school.id}
                       laboratoryId={laboratory.id}
                       laboratoryName={laboratory.name || `Laboratório ${laboratoryNumber}`}
                     />

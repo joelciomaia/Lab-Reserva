@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MockBackend } from '../services/mockBackend';
 import { formatWeekRange, getCurrentAgendaReferenceDate, getSchoolWeek } from '../utils/week';
 import { App } from './App';
@@ -18,6 +18,10 @@ function renderApp(route = '/', client = new MockBackend({ latencyMs: 0 })) {
 }
 
 describe('agenda semanal do professor', () => {
+  afterEach(() => {
+    delete window.APP_BOOTSTRAP;
+  });
+
   it('abre diretamente em uma grade semanal sem dashboard ou menu', async () => {
     renderApp();
     const expectedCurrentAgendaLabel = formatWeekRange(getCurrentAgendaReferenceDate(new Date()));
@@ -33,7 +37,9 @@ describe('agenda semanal do professor', () => {
       name: expectedCurrentAgendaLabel,
       level: 2,
     });
-    expect(screen.getByRole('link', { name: 'Agendar uma aula' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Agendar uma aula' }).getAttribute('href')).toContain(
+      'school=SCHOOL-DEMO',
+    );
     expect(screen.getByRole('link', { name: 'Acesso do laboratorista' })).toHaveAttribute(
       'href',
       '/gerenciar/geral',
@@ -95,11 +101,35 @@ describe('agenda semanal do professor', () => {
   });
 
   it('usa o laboratório indicado pelo link', async () => {
-    renderApp('/?lab=LAB02');
+    const client = new MockBackend({ latencyMs: 0 });
+    const getBootstrapData = vi.spyOn(client, 'getBootstrapData');
+    renderApp('/?school=SCHOOL-DEMO&lab=LAB02', client);
 
     expect(
       await screen.findByRole('heading', { name: 'Sala Maker', level: 1 }),
     ).toBeInTheDocument();
+    expect(getBootstrapData).toHaveBeenCalledWith({
+      schoolId: 'SCHOOL-DEMO',
+      preselectedLaboratoryId: 'LAB02',
+    });
+  });
+
+  it('sempre prioriza a escola e o laboratório explícitos no QR Code', async () => {
+    window.APP_BOOTSTRAP = {
+      preselectedLaboratoryId: 'LAB01',
+    };
+    const client = new MockBackend({ latencyMs: 0 });
+    const getBootstrapData = vi.spyOn(client, 'getBootstrapData');
+
+    renderApp('/?school=SCHOOL-DEMO&lab=LAB02', client);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Sala Maker', level: 1 }),
+    ).toBeInTheDocument();
+    expect(getBootstrapData).toHaveBeenCalledWith({
+      schoolId: 'SCHOOL-DEMO',
+      preselectedLaboratoryId: 'LAB02',
+    });
   });
 
   it('não troca silenciosamente um link inválido pelo primeiro laboratório', async () => {

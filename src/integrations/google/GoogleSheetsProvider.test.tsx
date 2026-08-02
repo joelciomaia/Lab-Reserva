@@ -15,18 +15,27 @@ const googleMocks = vi.hoisted(() => ({
   loadGoogleIdentityServices: vi.fn(),
   readAdminConfigurationWithMetadataFromGoogleSheets: vi.fn(),
   requestGoogleSheetsAccessToken: vi.fn(),
+  provisionSchoolWorkspace: vi.fn(),
   syncAdminConfigurationToGoogleSheets: vi.fn(),
 }));
 
-vi.mock('./googleDrive', () => ({
-  getAccessibleSpreadsheet: googleMocks.getAccessibleSpreadsheet,
-  listLabReservaSpreadsheets: googleMocks.listLabReservaSpreadsheets,
-  tagLabReservaSpreadsheet: googleMocks.tagLabReservaSpreadsheet,
-}));
+vi.mock('./googleDrive', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./googleDrive')>();
+  return {
+    ...actual,
+    getAccessibleSpreadsheet: googleMocks.getAccessibleSpreadsheet,
+    listLabReservaSpreadsheets: googleMocks.listLabReservaSpreadsheets,
+    tagLabReservaSpreadsheet: googleMocks.tagLabReservaSpreadsheet,
+  };
+});
 
 vi.mock('./googleIdentity', () => ({
   loadGoogleIdentityServices: googleMocks.loadGoogleIdentityServices,
   requestGoogleSheetsAccessToken: googleMocks.requestGoogleSheetsAccessToken,
+}));
+
+vi.mock('../../services/schoolProvisioning', () => ({
+  provisionSchoolWorkspace: googleMocks.provisionSchoolWorkspace,
 }));
 
 vi.mock('./googleSheets', async (importOriginal) => {
@@ -92,6 +101,8 @@ function Probe() {
       <output data-testid="authorized">{String(integration.isAuthorized)}</output>
       <output data-testid="spreadsheet">{integration.spreadsheetId ?? 'sem-planilha'}</output>
       <output data-testid="link">{integration.spreadsheetUrl ?? 'sem-link'}</output>
+      <output data-testid="public-ready">{String(integration.publicSchoolReady)}</output>
+      <output data-testid="public-error">{integration.publicSchoolError ?? 'sem-erro'}</output>
       <output data-testid="available">
         {integration.availableSpreadsheets.map((spreadsheet) => spreadsheet.id).join(',')}
       </output>
@@ -99,7 +110,10 @@ function Probe() {
       <button type="button" onClick={() => void integration.authorize()}>
         autorizar
       </button>
-      <button type="button" onClick={() => void integration.syncConfiguration(configuration)}>
+      <button
+        type="button"
+        onClick={() => void integration.syncConfiguration(configuration).catch(() => undefined)}
+      >
         sincronizar
       </button>
       <button type="button" onClick={() => void integration.loadLinkedConfiguration()}>
@@ -144,6 +158,10 @@ describe('GoogleSheetsProvider', () => {
       accessToken: 'token-somente-memoria',
       expiresInSeconds: 3600,
       grantedScope: 'https://www.googleapis.com/auth/drive.file',
+    });
+    googleMocks.provisionSchoolWorkspace.mockReset().mockResolvedValue({
+      schoolId: configuration.school.id,
+      spreadsheetId: 'sheet-created',
     });
     googleMocks.syncAdminConfigurationToGoogleSheets.mockReset().mockResolvedValue({
       spreadsheetId: 'sheet-created',
@@ -196,7 +214,14 @@ describe('GoogleSheetsProvider', () => {
       accessToken: 'token-somente-memoria',
       spreadsheetId: 'sheet-empty',
     });
+    expect(googleMocks.provisionSchoolWorkspace).toHaveBeenCalledWith({
+      accessToken: 'token-somente-memoria',
+      spreadsheetId: 'sheet-created',
+      schoolId: 'school-1',
+      revision: 'configuration-1',
+    });
     expect(screen.getByTestId('spreadsheet')).toHaveTextContent('sheet-created');
+    expect(screen.getByTestId('public-ready')).toHaveTextContent('true');
   });
 
   it('expira a autorização em memória no prazo informado pelo Google', async () => {
@@ -252,6 +277,64 @@ describe('GoogleSheetsProvider', () => {
     expect(googleMocks.readAdminConfigurationWithMetadataFromGoogleSheets).toHaveBeenCalledWith(
       'token-somente-memoria',
       'sheet-existing',
+    );
+    expect(googleMocks.provisionSchoolWorkspace).toHaveBeenCalledWith({
+      accessToken: 'token-somente-memoria',
+      spreadsheetId: 'sheet-existing',
+      schoolId: 'school-1',
+      revision: 'configuration-1',
+    });
+    expect(screen.getByTestId('public-ready')).toHaveTextContent('true');
+  });
+
+  it('mantém o painel disponível quando somente a publicação falha ao carregar', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(GOOGLE_SPREADSHEET_STORAGE_KEY, 'sheet-existing');
+    googleMocks.getAccessibleSpreadsheet.mockResolvedValue({
+      id: 'sheet-existing',
+      name: 'Lab Reserva - Escola',
+      modifiedTime: '2026-07-26T10:00:00.000Z',
+      webViewLink: 'https://docs.google.com/spreadsheets/d/sheet-existing/edit',
+      appProperties: { type: 'lab-reserva-config', version: '1' },
+    });
+    googleMocks.provisionSchoolWorkspace.mockRejectedValue(
+      new Error('Serviço público temporariamente indisponível.'),
+    );
+
+    render(
+      <GoogleSheetsProvider>
+        <Probe />
+      </GoogleSheetsProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'autorizar' }));
+    await user.click(screen.getByRole('button', { name: 'carregar configuração' }));
+
+    expect(screen.getByTestId('status')).toHaveTextContent('authorized');
+    expect(screen.getByTestId('public-ready')).toHaveTextContent('false');
+    expect(screen.getByTestId('public-error')).toHaveTextContent(
+      'Serviço público temporariamente indisponível.',
+    );
+    expect(screen.getByTestId('error')).toHaveTextContent('sem-erro');
+  });
+
+  it('mantém a planilha sincronizada disponível quando somente a publicação falha', async () => {
+    const user = userEvent.setup();
+    googleMocks.provisionSchoolWorkspace.mockRejectedValue(
+      new Error('Não foi possível registrar a escola.'),
+    );
+
+    render(
+      <GoogleSheetsProvider>
+        <Probe />
+      </GoogleSheetsProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'autorizar' }));
+    await user.click(screen.getByRole('button', { name: 'sincronizar' }));
+
+    expect(screen.getByTestId('spreadsheet')).toHaveTextContent('sheet-created');
+    expect(screen.getByTestId('public-ready')).toHaveTextContent('false');
+    expect(screen.getByTestId('public-error')).toHaveTextContent(
+      'Não foi possível registrar a escola.',
     );
   });
 

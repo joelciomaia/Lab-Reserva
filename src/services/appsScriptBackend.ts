@@ -76,6 +76,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function requirePublicSchoolId(value: string | undefined): string {
+  const schoolId = value?.trim();
+  if (!schoolId || schoolId.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(schoolId)) {
+    throw new BackendError(
+      'VALIDATION_ERROR',
+      'Este link da agenda está incompleto. Solicite ao laboratório um novo link ou QR Code.',
+    );
+  }
+  return schoolId;
+}
+
 function normalizeApiError(failure: ApiFailure): BackendError {
   const candidateCode = failure.error?.code;
   let code: AppErrorCode = 'INTERNAL_ERROR';
@@ -193,6 +204,7 @@ export class AppsScriptBackend implements BackendClient {
   getBootstrapData(params: BootstrapParams = {}): Promise<BootstrapData> {
     return this.get<BootstrapData>({
       action: 'bootstrap',
+      school: requirePublicSchoolId(params.schoolId),
       lab: params.preselectedLaboratoryId,
     });
   }
@@ -200,6 +212,7 @@ export class AppsScriptBackend implements BackendClient {
   async getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse> {
     const response = await this.get<AvailabilityResponse>({
       action: 'availability',
+      school: requirePublicSchoolId(request.schoolId),
       laboratoryId: request.laboratoryId,
       date: request.date,
     });
@@ -214,7 +227,12 @@ export class AppsScriptBackend implements BackendClient {
   }
 
   createReservation(request: CreateReservationRequest): Promise<Reservation> {
-    return this.post<Reservation>({ action: 'createReservation', request });
+    const { schoolId, ...reservationRequest } = request;
+    return this.post<Reservation>({
+      action: 'createReservation',
+      school: requirePublicSchoolId(schoolId),
+      request: reservationRequest,
+    });
   }
 }
 
@@ -222,7 +240,7 @@ export class UnconfiguredBackend implements BackendClient {
   private unavailable(): BackendError {
     return new BackendError(
       'BACKEND_UNAVAILABLE',
-      'A agenda real ainda não foi conectada ao Google Sheets. Entre como laboratorista para concluir a configuração.',
+      'A agenda ainda não está disponível neste endereço. Avise o responsável pela implantação.',
     );
   }
 

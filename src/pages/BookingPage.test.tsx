@@ -417,7 +417,7 @@ describe('formulário de agendamento', () => {
     const createReservation = vi.spyOn(client, 'createReservation');
     const nextWeekMonday = getSchoolWeek(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))[0]!
       .isoDate;
-    renderBookingPage(`/agendar?lab=LAB02&date=${nextWeekMonday}`, client);
+    renderBookingPage(`/agendar?school=SCHOOL-DEMO&lab=LAB02&date=${nextWeekMonday}`, client);
     await screen.findByRole('heading', { name: 'Fazer agendamento', level: 1 });
 
     await user.type(screen.getByRole('textbox', { name: /Nome do professor/i }), 'Joana Alves');
@@ -455,6 +455,7 @@ describe('formulário de agendamento', () => {
     ).toBeInTheDocument();
     expect(createReservation).toHaveBeenCalledWith(
       expect.objectContaining({
+        schoolId: 'SCHOOL-DEMO',
         subject: 'Biologia',
         classGroup: '1ª série A',
         knowledgeObjects: 'Organização celular e metabolismo',

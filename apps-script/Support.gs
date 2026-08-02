@@ -45,6 +45,10 @@ var RESERVATION_STATUS_ = {
   CANCELLED: 'CANCELLED',
 };
 
+var SCHOOL_TO_SPREADSHEET_PROPERTY_PREFIX_ = 'LAB_RESERVA_SCHOOL_TO_SPREADSHEET::';
+var SPREADSHEET_TO_SCHOOL_PROPERTY_PREFIX_ = 'LAB_RESERVA_SPREADSHEET_TO_SCHOOL::';
+var BACKEND_ACCOUNT_EMAIL_PROPERTY_ = 'BACKEND_ACCOUNT_EMAIL';
+
 function throwApiError_(code, message, details) {
   var error = new Error(message);
   error.name = 'ApiError';
@@ -132,35 +136,217 @@ function rowIsBlank_(row) {
   return true;
 }
 
-function spreadsheet_() {
-  var spreadsheetId = optionalText_(
-    PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'),
-  );
-  if (!spreadsheetId) {
+function schoolId_(value, field, errorCode) {
+  if (typeof value !== 'string') {
     throwApiError_(
-      'CONFIGURATION_ERROR',
-      'A Script Property SPREADSHEET_ID ainda não foi configurada.',
+      errorCode || 'VALIDATION_ERROR',
+      'O identificador público da escola é inválido.',
+      {
+        field: field || 'school',
+      },
     );
   }
-  if (!/^[A-Za-z0-9_-]+$/.test(spreadsheetId)) {
+  var normalized = optionalText_(value);
+  if (!normalized || normalized.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(normalized)) {
     throwApiError_(
-      'CONFIGURATION_ERROR',
-      'A Script Property SPREADSHEET_ID deve conter somente o ID da planilha.',
+      errorCode || 'VALIDATION_ERROR',
+      'O identificador público da escola é inválido.',
+      {
+        field: field || 'school',
+      },
     );
   }
+  return normalized;
+}
 
+function spreadsheetId_(value) {
+  if (typeof value !== 'string') {
+    throwApiError_('VALIDATION_ERROR', 'O identificador da planilha é inválido.', {
+      field: 'spreadsheetId',
+    });
+  }
+  var normalized = optionalText_(value);
+  if (!normalized || normalized.length > 256 || !/^[A-Za-z0-9_-]+$/.test(normalized)) {
+    throwApiError_('VALIDATION_ERROR', 'O identificador da planilha é inválido.', {
+      field: 'spreadsheetId',
+    });
+  }
+  return normalized;
+}
+
+function schoolRegistryPropertyKey_(schoolId) {
+  return SCHOOL_TO_SPREADSHEET_PROPERTY_PREFIX_ + schoolId;
+}
+
+function spreadsheetRegistryPropertyKey_(spreadsheetId) {
+  return SPREADSHEET_TO_SCHOOL_PROPERTY_PREFIX_ + spreadsheetId;
+}
+
+function configurationIdentity_(spreadsheet) {
+  var settingsTable = readTable_(spreadsheet, 'CONFIGURACOES', ['CHAVE', 'VALOR']);
+  var settings = settingsMap_(settingsTable);
+  return {
+    schoolId: schoolId_(settings.ID_ESCOLA, 'ID_ESCOLA', 'DATA_INTEGRITY_ERROR'),
+    revision: requiredText_(cellText_(settings.REVISAO), 'REVISAO', 256),
+  };
+}
+
+function assertSpreadsheetSchool_(spreadsheet, expectedSchoolId) {
+  var identity = configurationIdentity_(spreadsheet);
+  if (identity.schoolId !== expectedSchoolId) {
+    throwApiError_(
+      'SPREADSHEET_UNAVAILABLE',
+      'O espaço da escola não está disponível ou perdeu o vínculo publicado.',
+    );
+  }
+  return identity;
+}
+
+function openRegisteredSpreadsheet_(spreadsheetId) {
   try {
     return SpreadsheetApp.openById(spreadsheetId);
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
-    throwApiError_(
-      'SPREADSHEET_UNAVAILABLE',
-      'Não foi possível abrir a planilha configurada para este serviço.',
-    );
+    throwApiError_('SPREADSHEET_UNAVAILABLE', 'O espaço da escola não está disponível no momento.');
   }
 }
 
-function withScriptLock_(operation) {
+function spreadsheetForSchool_(school) {
+  var normalizedSchoolId = schoolId_(school, 'school', 'VALIDATION_ERROR');
+  var properties = PropertiesService.getScriptProperties();
+  var spreadsheetId = optionalText_(
+    properties.getProperty(schoolRegistryPropertyKey_(normalizedSchoolId)),
+  );
+  if (!spreadsheetId || spreadsheetId.length > 256 || !/^[A-Za-z0-9_-]+$/.test(spreadsheetId)) {
+    throwApiError_(
+      'SPREADSHEET_UNAVAILABLE',
+      'O espaço da escola não foi encontrado ou ainda não foi publicado.',
+    );
+  }
+
+  var reverseSchoolId = optionalText_(
+    properties.getProperty(spreadsheetRegistryPropertyKey_(spreadsheetId)),
+  );
+  if (reverseSchoolId !== normalizedSchoolId) {
+    throwApiError_(
+      'SPREADSHEET_UNAVAILABLE',
+      'O espaço da escola não está disponível ou perdeu o vínculo publicado.',
+    );
+  }
+
+  var spreadsheet = openRegisteredSpreadsheet_(spreadsheetId);
+  assertSpreadsheetSchool_(spreadsheet, normalizedSchoolId);
+  return spreadsheet;
+}
+
+function backendAccountEmail_() {
+  var properties = PropertiesService.getScriptProperties();
+  var configuredEmail = optionalText_(properties.getProperty(BACKEND_ACCOUNT_EMAIL_PROPERTY_));
+  var effectiveEmail = '';
+  try {
+    effectiveEmail = optionalText_(Session.getEffectiveUser().getEmail());
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+  }
+
+  if (
+    configuredEmail &&
+    effectiveEmail &&
+    configuredEmail.toLowerCase() !== effectiveEmail.toLowerCase()
+  ) {
+    throwApiError_(
+      'CONFIGURATION_ERROR',
+      'A conta configurada para o backend não corresponde à conta efetiva da implantação.',
+    );
+  }
+
+  var email = effectiveEmail || configuredEmail;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throwApiError_(
+      'CONFIGURATION_ERROR',
+      'Não foi possível identificar a conta que recebe acesso às planilhas.',
+    );
+  }
+  return email.toLowerCase();
+}
+
+function serviceInfo_() {
+  return { backendAccountEmail: backendAccountEmail_() };
+}
+
+function assertBackendWriterAccess_(spreadsheetId) {
+  try {
+    var file = DriveApp.getFileById(spreadsheetId);
+    var access = file.getAccess(backendAccountEmail_());
+    if (access === DriveApp.Permission.EDIT || access === DriveApp.Permission.OWNER) {
+      return;
+    }
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+  }
+  throwApiError_(
+    'SPREADSHEET_UNAVAILABLE',
+    'Não foi possível confirmar o acesso de edição à planilha. Tente publicar novamente.',
+  );
+}
+
+function registerSchool_(rawRequest) {
+  var request = isPlainObject_(rawRequest) ? rawRequest : {};
+  var requestedSpreadsheetId = spreadsheetId_(request.spreadsheetId);
+  var requestedSchoolId = schoolId_(request.schoolId, 'schoolId', 'VALIDATION_ERROR');
+  var requestedRevision = requiredText_(request.revision, 'revision', 256);
+
+  return withScriptLock_(function () {
+    assertBackendWriterAccess_(requestedSpreadsheetId);
+    var spreadsheet;
+    try {
+      spreadsheet = SpreadsheetApp.openById(requestedSpreadsheetId);
+    } catch (error) {
+      console.error(error && error.stack ? error.stack : error);
+      throwApiError_(
+        'SPREADSHEET_UNAVAILABLE',
+        'Não foi possível concluir o vínculo automático com a planilha. Tente novamente.',
+      );
+    }
+
+    var identity = configurationIdentity_(spreadsheet);
+    if (identity.schoolId !== requestedSchoolId || identity.revision !== requestedRevision) {
+      throwApiError_(
+        'CONFIGURATION_CONFLICT',
+        'A planilha publicada não corresponde à escola ou à revisão informada.',
+      );
+    }
+
+    var properties = PropertiesService.getScriptProperties();
+    var schoolKey = schoolRegistryPropertyKey_(requestedSchoolId);
+    var spreadsheetKey = spreadsheetRegistryPropertyKey_(requestedSpreadsheetId);
+    var mappedSpreadsheetId = optionalText_(properties.getProperty(schoolKey));
+    var mappedSchoolId = optionalText_(properties.getProperty(spreadsheetKey));
+    if (
+      (mappedSpreadsheetId && mappedSpreadsheetId !== requestedSpreadsheetId) ||
+      (mappedSchoolId && mappedSchoolId !== requestedSchoolId)
+    ) {
+      throwApiError_(
+        'CONFIGURATION_CONFLICT',
+        'Esta escola ou planilha já possui outro vínculo e não pode ser substituída.',
+      );
+    }
+
+    var updates = {};
+    if (!mappedSpreadsheetId) updates[schoolKey] = requestedSpreadsheetId;
+    if (!mappedSchoolId) updates[spreadsheetKey] = requestedSchoolId;
+    if (Object.keys(updates).length > 0) {
+      properties.setProperties(updates, false);
+    }
+
+    return {
+      schoolId: requestedSchoolId,
+      sourceSpreadsheetFingerprint: spreadsheetBindingFingerprint_(spreadsheet),
+    };
+  }, 'O serviço está concluindo outra publicação. Tente novamente em instantes.');
+}
+
+function withScriptLock_(operation, busyMessage) {
   var lock = LockService.getScriptLock();
   var acquired = false;
   try {
@@ -171,7 +357,7 @@ function withScriptLock_(operation) {
   if (!acquired) {
     throwApiError_(
       'LOCK_TIMEOUT',
-      'O serviço está processando outro agendamento. Tente novamente em instantes.',
+      busyMessage || 'O serviço está processando outra operação. Tente novamente em instantes.',
     );
   }
 

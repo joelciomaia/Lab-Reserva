@@ -17,6 +17,7 @@ describe('LaboratoryPublicAccess', () => {
   it('mostra o QR Code e o link público canônico', () => {
     render(
       <LaboratoryPublicAccess
+        schoolId="SCHOOL-01"
         laboratoryId="LAB01"
         laboratoryName="Laboratório de Informática"
         publicAppUrl="https://agenda.escola.edu.br/app/"
@@ -28,7 +29,7 @@ describe('LaboratoryPublicAccess', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('textbox', { name: 'Link público de Laboratório de Informática' }),
-    ).toHaveValue('https://agenda.escola.edu.br/app/#/?lab=LAB01');
+    ).toHaveValue('https://agenda.escola.edu.br/app/#/?school=SCHOOL-01&lab=LAB01');
   });
 
   it('abre a agenda pública sem compartilhar a janela de origem', async () => {
@@ -36,6 +37,7 @@ describe('LaboratoryPublicAccess', () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(
       <LaboratoryPublicAccess
+        schoolId="SCHOOL-01"
         laboratoryId="LAB01"
         laboratoryName="Laboratório de Informática"
         publicAppUrl="https://agenda.escola.edu.br/"
@@ -45,7 +47,7 @@ describe('LaboratoryPublicAccess', () => {
     await user.click(screen.getByRole('button', { name: 'Abrir' }));
 
     expect(open).toHaveBeenCalledWith(
-      'https://agenda.escola.edu.br/#/?lab=LAB01',
+      'https://agenda.escola.edu.br/#/?school=SCHOOL-01&lab=LAB01',
       '_blank',
       'noopener,noreferrer',
     );
@@ -57,6 +59,7 @@ describe('LaboratoryPublicAccess', () => {
     const clipboardWrite = vi.spyOn(navigator.clipboard, 'writeText');
     render(
       <LaboratoryPublicAccess
+        schoolId="SCHOOL-01"
         laboratoryId="LAB01"
         laboratoryName="Laboratório de Informática"
         publicAppUrl="https://agenda.escola.edu.br/"
@@ -65,7 +68,9 @@ describe('LaboratoryPublicAccess', () => {
 
     await user.click(screen.getByRole('button', { name: 'Copiar link' }));
 
-    expect(clipboardWrite).toHaveBeenCalledWith('https://agenda.escola.edu.br/#/?lab=LAB01');
+    expect(clipboardWrite).toHaveBeenCalledWith(
+      'https://agenda.escola.edu.br/#/?school=SCHOOL-01&lab=LAB01',
+    );
     expect(screen.getByRole('status')).toHaveTextContent('Link copiado.');
     clipboardWrite.mockRestore();
   });
@@ -75,6 +80,7 @@ describe('LaboratoryPublicAccess', () => {
     downloadQrCodeAsJpeg.mockResolvedValue(undefined);
     render(
       <LaboratoryPublicAccess
+        schoolId="SCHOOL-01"
         laboratoryId="LAB01"
         laboratoryName="Laboratório de Química / Sala 1"
         publicAppUrl="https://agenda.escola.edu.br/"
@@ -95,6 +101,7 @@ describe('LaboratoryPublicAccess', () => {
     downloadQrCodeAsJpeg.mockRejectedValue(new Error('Canvas indisponível'));
     render(
       <LaboratoryPublicAccess
+        schoolId="SCHOOL-01"
         laboratoryId="LAB01"
         laboratoryName="Laboratório de Informática"
         publicAppUrl="https://agenda.escola.edu.br/"

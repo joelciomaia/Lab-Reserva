@@ -18,7 +18,7 @@ No celular, a agenda mantém os cinco dias úteis visíveis sem rolagem horizont
 
 A abertura padrão mantém a semana vigente de segunda a sexta. A partir do sábado, passa automaticamente para a próxima semana escolar; o botão **Hoje** usa a mesma referência. Uma data recebida pelo link ou pelo retorno de um agendamento sempre prevalece, preservando a semana que o usuário solicitou.
 
-Os períodos são dados do backend, não valores fixos da interface. O mesmo layout aceita escolas com um, dois ou três turnos e quantidades diferentes de aulas por turno. Cada período pode informar os dias da semana em que existe; assim, um turno extra de quarta-feira aparece somente quando uma quarta-feira é escolhida. O backend público definitivo deverá entregar esse catálogo normalizado para cada escola.
+Os períodos são dados do backend, não valores fixos da interface. O mesmo layout aceita escolas com um, dois ou três turnos e quantidades diferentes de aulas por turno. Cada período pode informar os dias da semana em que existe; assim, um turno extra de quarta-feira aparece somente quando uma quarta-feira é escolhida. O Web App entrega esse catálogo a partir da planilha registrada para cada escola.
 
 Sem uma configuração real publicada, a agenda apresenta um erro explícito. Dados demonstrativos nunca são usados como fallback em produção.
 
@@ -43,6 +43,8 @@ https://www.googleapis.com/auth/drive.file
 Esse escopo limita o aplicativo aos arquivos que ele criou ou que o usuário abriu/escolheu com ele; não concede leitura geral do Google Drive. A mesma autorização permite usar a Drive API para localizar os arquivos do Lab Reserva e a Sheets API para ler e escrever seu conteúdo. O access token existe somente em memória. Ele não é gravado no `localStorage` nem no `sessionStorage`; após recarregar a página ou perder a autorização, o laboratorista precisa autorizar novamente.
 
 O Client ID pertence ao aplicativo implantado, não à escola. Portanto, cada ambiente normalmente possui um único Client ID centralizado — por exemplo, um para desenvolvimento e outro para produção — e esse mesmo Client ID atende todos os laboratoristas e escolas que acessarem aquela origem. O usuário final não precisa criar projeto Google Cloud, Client ID ou credenciais.
+
+O Web App também é implantado uma única vez. Em cada novo acesso, o aplicativo cria ou recupera a planilha na conta autorizada, compartilha automaticamente somente esse arquivo com a conta institucional que executa o backend, registra o vínculo da escola e valida o resultado antes de liberar o link e o QR Code. Não existe cadastro manual de e-mail ou planilha por escola. Para evitar bloqueio de compartilhamento entre organizações, essa conta central deve pertencer ao mesmo domínio Google Workspace das escolas.
 
 ### Configurar o Client ID
 
@@ -69,7 +71,7 @@ Depois da autorização, o fluxo ocorre na própria conta Google do laboratorist
 1. o aplicativo testa o vínculo corrente salvo no navegador;
 2. consulta o pequeno histórico local de IDs conhecidos;
 3. procura no Drive somente planilhas marcadas com `appProperties` privadas do Lab Reserva;
-4. se não encontrar nenhuma, deixa o usuário configurar uma nova escola;
+4. se não encontrar nenhuma, cria automaticamente uma nova planilha da escola;
 5. se encontrar uma, vincula-a automaticamente;
 6. se encontrar várias, mostra os nomes para o usuário escolher ou permite configurar uma nova escola;
 7. antes de exibir os campos editáveis, lê a planilha escolhida e restaura sua configuração no backend da sessão.
@@ -95,9 +97,11 @@ CANCELAMENTOS
 
 O painel começa sem laboratórios, turnos, turmas, disciplinas, recursos ou agendamentos demonstrativos. Os dados principais podem ser salvos como configuração inicial, e a planilha recebe o nome da escola; pendências de horários, turmas e recursos continuam visíveis no painel sem apagar o que já foi informado. As seis abas de configuração são substituídas em uma única operação atômica: uma falha mantém a versão anterior completa. `RESERVAS` é append-only: cada agendamento recebe uma linha com suas aulas e horários e nunca é apagado pela sincronização. `CANCELAMENTOS` também é append-only e recebe uma linha por aula desagendada, permitindo cancelamento parcial ou total com auditoria. Depois de escrever configurações, a aplicação relê e verifica as matrizes enviadas.
 
+No mesmo salvamento, a aplicação consulta a conta central do Web App, concede a ela acesso de edição somente à planilha criada pelo aplicativo e registra o par escola–planilha. O QR Code só é liberado depois que o backend confirma o mesmo vínculo por fingerprint. O token Google e o ID da planilha nunca entram no link público.
+
 Ao abrir uma planilha criada antes dessa estrutura, a integração usa o catálogo padrão de recursos, mantém observações ocultas e realiza uma migração automática única para materializar a nova aba e a nova chave, sem limpar nem sobrescrever `RESERVAS`.
 
-O Google Agenda continua opcional. Para a agenda pública, publique o projeto de `apps-script/` conforme [`apps-script/README.md`](apps-script/README.md) e configure `VITE_GOOGLE_APPS_SCRIPT_URL`.
+O Google Agenda continua opcional. Para a agenda pública, publique o projeto de `apps-script/` conforme [`apps-script/README.md`](apps-script/README.md) e configure uma única vez `VITE_GOOGLE_APPS_SCRIPT_URL` e `VITE_GOOGLE_APPS_SCRIPT_ACCOUNT_EMAIL`. O segundo valor fixa a conta institucional esperada; o frontend não compartilha planilhas se o Web App responder com outro e-mail.
 
 ## Executar localmente
 
@@ -113,16 +117,14 @@ O Vite informa o endereço local, normalmente `http://localhost:5173`.
 Links de exemplo:
 
 ```text
-http://localhost:5173/#/
-http://localhost:5173/#/?lab=LAB02
-http://localhost:5173/?lab=LAB02#/
+http://localhost:5173/#/?school=SCHOOL-UUID&lab=LAB02
 http://localhost:5173/#/gerenciar
 http://localhost:5173/#/gerenciar/entrar
 ```
 
-O parâmetro `lab` escolhe o laboratório correspondente ao link. Sem o parâmetro, a agenda usa o primeiro laboratório ativo; um ID informado e inexistente produz erro explícito.
+O parâmetro `school` seleciona o workspace público registrado e `lab` escolhe o laboratório correspondente. O ID da planilha não aparece no endereço. Um workspace ou laboratório inexistente produz erro explícito.
 
-Assim que os dados principais do laboratório são confirmados no Google Sheets, a seção **Geral** oferece os botões **Abrir**, **Copiar link** e **Baixar QR Code** em JPG. A disponibilidade do serviço público não bloqueia a geração do material de acesso. Links com um laboratório inexistente mostram erro e nunca caem silenciosamente em outro laboratório.
+Assim que os dados principais são confirmados no Google Sheets e o vínculo automático com o Web App é validado, a seção **Geral** oferece **Abrir**, **Copiar link** e **Baixar QR Code** em JPG. Links inválidos mostram erro e nunca caem silenciosamente em outra escola ou laboratório.
 
 ## Scripts
 
@@ -185,6 +187,8 @@ A suíte automatizada cobre:
 - preservação da aba `RESERVAS` em sincronizações posteriores;
 - leitura das reservas reais e cancelamento parcial ou total por registros append-only;
 - geração do link e download do QR Code específico por laboratório;
+- compartilhamento e registro automáticos da planilha de cada escola no backend público;
+- isolamento do bootstrap, disponibilidade e reservas pelo ID público da escola;
 - salvamento dos dados principais e geração do acesso antes da configuração de horários, turmas e recursos;
 - migração compatível de planilhas antigas para a aba `RECURSOS`;
 - propagação de horários, turmas, disciplinas e recursos configurados para a área do professor;
@@ -202,7 +206,7 @@ npm run test:run
 
 - dashboard, avisos, estatísticas, atalhos e menu global;
 - autenticação administrativa completa e recuperação da sessão OAuth;
-- backend público multi-tenant e links persistentes isolados por escola;
 - Google Agenda;
+- proteção antiautomação e rate limiting para exposição em grande escala;
 - auditoria e regras para alterações que afetem reservas futuras;
 - recorrência e regras avançadas de recursos.

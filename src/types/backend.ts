@@ -12,6 +12,8 @@ import type {
 } from './configuration';
 
 export interface BootstrapParams {
+  /** Identificador público e imutável da escola usada como workspace. */
+  schoolId?: string;
   preselectedLaboratoryId?: string;
 }
 

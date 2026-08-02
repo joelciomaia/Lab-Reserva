@@ -309,7 +309,7 @@ export function BookingPage() {
   );
   const availabilityKey =
     laboratory && isValidIsoDate(selectedDate)
-      ? `${laboratory.id}:${selectedDate}:${availabilityVersion}`
+      ? `${data?.school.id ?? ''}:${laboratory.id}:${selectedDate}:${availabilityVersion}`
       : null;
   const availability =
     availabilityKey && availabilityRequest.key === availabilityKey
@@ -332,14 +332,18 @@ export function BookingPage() {
   }, [laboratory]);
 
   useEffect(() => {
-    if (!laboratory || !availabilityKey) {
+    if (!data || !laboratory || !availabilityKey) {
       return;
     }
 
     let isCurrent = true;
 
     void client
-      .getAvailability({ laboratoryId: laboratory.id, date: selectedDate })
+      .getAvailability({
+        schoolId: data.school.id,
+        laboratoryId: laboratory.id,
+        date: selectedDate,
+      })
       .then((response) => {
         if (isCurrent) {
           setAvailabilityRequest({ key: availabilityKey, data: response, error: null });
@@ -358,7 +362,7 @@ export function BookingPage() {
     return () => {
       isCurrent = false;
     };
-  }, [availabilityKey, client, laboratory, selectedDate]);
+  }, [availabilityKey, client, data, laboratory, selectedDate]);
 
   useEffect(() => {
     if (
@@ -451,7 +455,7 @@ export function BookingPage() {
   }
 
   async function submitReservation(values: BookingFormData) {
-    if (!laboratory) {
+    if (!data || !laboratory) {
       return;
     }
 
@@ -482,6 +486,7 @@ export function BookingPage() {
     setRequestError(null);
     try {
       const reservation = await client.createReservation({
+        schoolId: data.school.id,
         laboratoryId: laboratory.id,
         teacherName: values.teacherName,
         subject,
@@ -493,10 +498,13 @@ export function BookingPage() {
         notes: showObservations ? values.notes : '',
       });
 
-      navigate(`/?lab=${encodeURIComponent(laboratory.id)}`, {
-        replace: true,
-        state: { reservationId: reservation.id, reservationDate: reservation.date },
-      });
+      navigate(
+        `/?school=${encodeURIComponent(data.school.id)}&lab=${encodeURIComponent(laboratory.id)}`,
+        {
+          replace: true,
+          state: { reservationId: reservation.id, reservationDate: reservation.date },
+        },
+      );
     } catch (error: unknown) {
       const friendlyError = getFriendlyError(error);
       setRequestError(friendlyError);
@@ -533,7 +541,7 @@ export function BookingPage() {
     );
   }
 
-  const scheduleUrl = `/?lab=${encodeURIComponent(laboratory.id)}&date=${selectedDate}`;
+  const scheduleUrl = `/?school=${encodeURIComponent(data.school.id)}&lab=${encodeURIComponent(laboratory.id)}&date=${selectedDate}`;
   const dateRegistration = register('date');
   const subjectRegistration = register('subjectId');
   const classGroupRegistration = register('classGroupId');

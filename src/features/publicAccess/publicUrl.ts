@@ -38,16 +38,20 @@ function normalizeApplicationBaseUrl(rawBaseUrl: string, currentUrl: string): st
 }
 
 /**
- * Builds the public HashRouter URL for a laboratory. Only the public laboratory
- * identifier is included; Google Sheet identifiers, endpoints and tokens never
- * become part of the link.
+ * Builds the public HashRouter URL for a laboratory inside its school workspace.
+ * Google Sheet identifiers, endpoints and tokens never become part of the link.
  */
 export function buildLaboratoryPublicUrl(
+  schoolId: string,
   laboratoryId: string,
   options: BuildLaboratoryPublicUrlOptions = {},
 ): string {
+  const normalizedSchoolId = schoolId.trim();
   const normalizedLaboratoryId = laboratoryId.trim();
 
+  if (!normalizedSchoolId) {
+    throw new Error('O identificador público da escola é obrigatório.');
+  }
   if (!normalizedLaboratoryId) {
     throw new Error('O identificador público do laboratório é obrigatório.');
   }
@@ -64,5 +68,5 @@ export function buildLaboratoryPublicUrl(
       : requestedPublicAppUrl;
   const baseUrl = normalizeApplicationBaseUrl(rawBaseUrl, currentUrl);
 
-  return `${baseUrl}#/?lab=${encodeURIComponent(normalizedLaboratoryId)}`;
+  return `${baseUrl}#/?school=${encodeURIComponent(normalizedSchoolId)}&lab=${encodeURIComponent(normalizedLaboratoryId)}`;
 }

@@ -38,6 +38,8 @@ export interface PeriodAvailability {
 }
 
 export interface AvailabilityRequest {
+  /** Opcional apenas para compatibilidade com o backend legado de uma escola. */
+  schoolId?: string;
   laboratoryId: string;
   date: string;
 }

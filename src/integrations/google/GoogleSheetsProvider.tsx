@@ -14,7 +14,9 @@ import type {
   CancelReservationPeriodsRequest,
   ManagedReservation,
 } from '../../types';
+import { provisionSchoolWorkspace } from '../../services/schoolProvisioning';
 import {
+  GoogleDriveIntegrationError,
   getAccessibleSpreadsheet,
   listLabReservaSpreadsheets,
   tagLabReservaSpreadsheet,
@@ -72,6 +74,8 @@ export interface GoogleSheetsContextValue {
   ) => Promise<ManagedReservation>;
   spreadsheetId: string | null;
   spreadsheetUrl: string | null;
+  publicSchoolReady: boolean;
+  publicSchoolError: string | null;
   availableSpreadsheets: readonly LabReservaSpreadsheet[];
   selectSpreadsheet: (spreadsheetId: string) => void;
   startNewSchool: () => Promise<void>;
@@ -93,6 +97,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
   const [status, setStatus] = useState<GoogleSheetsStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [spreadsheetId, setSpreadsheetId] = useState<string | null>(() => getStoredSpreadsheetId());
+  const [publicSchoolReady, setPublicSchoolReady] = useState(false);
+  const [publicSchoolError, setPublicSchoolError] = useState<string | null>(null);
   const [availableSpreadsheets, setAvailableSpreadsheets] = useState<
     readonly LabReservaSpreadsheet[]
   >([]);
@@ -108,6 +114,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
     clearTokenExpirationTimer();
     accessTokenRef.current = null;
     setIsAuthorized(false);
+    setPublicSchoolReady(false);
+    setPublicSchoolError(null);
     setAvailableSpreadsheets([]);
   }, [clearTokenExpirationTimer]);
 
@@ -134,6 +142,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
 
     setError(null);
     setIsAuthorized(false);
+    setPublicSchoolReady(false);
+    setPublicSchoolError(null);
     setStatus('creating-spreadsheet');
     const previousSpreadsheetId = getStoredSpreadsheetId() ?? spreadsheetId;
 
@@ -169,6 +179,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
       try {
         storeSpreadsheetId(selectedSpreadsheet.id);
         setSpreadsheetId(selectedSpreadsheet.id);
+        setPublicSchoolReady(false);
+        setPublicSchoolError(null);
         setAvailableSpreadsheets([]);
         setIsAuthorized(true);
         setStatus('authorized');
@@ -185,6 +197,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
   const authorize = useCallback(
     async (options: GoogleAuthorizationOptions = {}) => {
       setError(null);
+      setPublicSchoolReady(false);
+      setPublicSchoolError(null);
       setStatus('loading-script');
 
       try {
@@ -201,6 +215,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
           accessTokenRef.current = null;
           tokenExpirationTimerRef.current = null;
           setIsAuthorized(false);
+          setPublicSchoolReady(false);
+          setPublicSchoolError(null);
           setAvailableSpreadsheets([]);
           setStatus('idle');
         }, authorization.expiresInSeconds * 1000);
@@ -307,20 +323,35 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
       }
 
       setError(null);
+      setPublicSchoolError(null);
       setStatus('syncing');
 
+      let configurationWasWritten = false;
       try {
         const result = await syncAdminConfigurationToGoogleSheets(configuration, {
           accessToken,
           spreadsheetId,
         });
+        configurationWasWritten = true;
         setSpreadsheetId(result.spreadsheetId);
+        await provisionSchoolWorkspace({
+          accessToken,
+          spreadsheetId: result.spreadsheetId,
+          schoolId: configuration.school.id,
+          revision: configuration.revision,
+        });
+        setPublicSchoolReady(true);
+        setPublicSchoolError(null);
         setStatus('authorized');
         return result;
       } catch (syncError: unknown) {
+        setPublicSchoolReady(false);
+        setPublicSchoolError(configurationWasWritten ? errorMessage(syncError) : null);
         if (
-          syncError instanceof GoogleSheetsIntegrationError &&
-          syncError.code === 'AUTHORIZATION_REQUIRED'
+          (syncError instanceof GoogleSheetsIntegrationError &&
+            syncError.code === 'AUTHORIZATION_REQUIRED') ||
+          (syncError instanceof GoogleDriveIntegrationError &&
+            syncError.code === 'AUTHORIZATION_REQUIRED')
         ) {
           forgetAccessToken();
         }
@@ -361,12 +392,40 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
           spreadsheetId,
         });
       }
+      if (result.configuration) {
+        try {
+          await provisionSchoolWorkspace({
+            accessToken,
+            spreadsheetId,
+            schoolId: result.configuration.school.id,
+            revision: result.configuration.revision,
+          });
+          setPublicSchoolReady(true);
+          setPublicSchoolError(null);
+        } catch (provisioningError: unknown) {
+          if (
+            provisioningError instanceof GoogleDriveIntegrationError &&
+            provisioningError.code === 'AUTHORIZATION_REQUIRED'
+          ) {
+            throw provisioningError;
+          }
+          setPublicSchoolReady(false);
+          setPublicSchoolError(errorMessage(provisioningError));
+        }
+      } else {
+        setPublicSchoolReady(false);
+        setPublicSchoolError(null);
+      }
       setStatus('authorized');
       return result.configuration;
     } catch (loadError: unknown) {
+      setPublicSchoolReady(false);
+      setPublicSchoolError(null);
       if (
-        loadError instanceof GoogleSheetsIntegrationError &&
-        loadError.code === 'AUTHORIZATION_REQUIRED'
+        (loadError instanceof GoogleSheetsIntegrationError &&
+          loadError.code === 'AUTHORIZATION_REQUIRED') ||
+        (loadError instanceof GoogleDriveIntegrationError &&
+          loadError.code === 'AUTHORIZATION_REQUIRED')
       ) {
         forgetAccessToken();
       }
@@ -475,6 +534,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
       cancelReservationPeriods,
       spreadsheetId,
       spreadsheetUrl: getSpreadsheetUrl(spreadsheetId),
+      publicSchoolReady,
+      publicSchoolError,
       availableSpreadsheets,
       selectSpreadsheet,
       startNewSchool,
@@ -490,6 +551,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
       listReservations,
       selectSpreadsheet,
       spreadsheetId,
+      publicSchoolReady,
+      publicSchoolError,
       startNewSchool,
       status,
       syncConfiguration,

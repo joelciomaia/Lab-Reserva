@@ -31,9 +31,9 @@ describe('AppsScriptBackend', () => {
       .mockResolvedValue(jsonResponse({ ok: true, data }));
     const client = new AppsScriptBackend(endpoint, { fetchImplementation });
 
-    await expect(client.getBootstrapData({ preselectedLaboratoryId: 'LAB 1' })).resolves.toEqual(
-      data,
-    );
+    await expect(
+      client.getBootstrapData({ schoolId: 'SCHOOL-1', preselectedLaboratoryId: 'LAB-1' }),
+    ).resolves.toEqual(data);
 
     const [requestedUrl, init] = fetchImplementation.mock.calls[0]!;
     expect(requestedUrl).toBeInstanceOf(URL);
@@ -42,12 +42,14 @@ describe('AppsScriptBackend', () => {
     }
     const url = new URL(requestedUrl);
     expect(url.searchParams.get('action')).toBe('bootstrap');
-    expect(url.searchParams.get('lab')).toBe('LAB 1');
+    expect(url.searchParams.get('school')).toBe('SCHOOL-1');
+    expect(url.searchParams.get('lab')).toBe('LAB-1');
     expect(init).toMatchObject({ method: 'GET', cache: 'no-store' });
   });
 
   it('envia a reserva como POST simples para evitar preflight', async () => {
     const request: CreateReservationRequest = {
+      schoolId: 'SCHOOL-1',
       laboratoryId: 'LAB01',
       teacherName: 'Joana',
       subject: 'Biologia',
@@ -90,7 +92,12 @@ describe('AppsScriptBackend', () => {
     if (typeof init?.body !== 'string') {
       throw new TypeError('O corpo da reserva deve ser JSON textual.');
     }
-    expect(JSON.parse(init.body) as unknown).toEqual({ action: 'createReservation', request });
+    const { schoolId, ...reservationRequest } = request;
+    expect(JSON.parse(init.body) as unknown).toEqual({
+      action: 'createReservation',
+      school: schoolId,
+      request: reservationRequest,
+    });
   });
 
   it('mantém o payload público de disponibilidade sem dados pessoais da reserva', async () => {
@@ -125,11 +132,18 @@ describe('AppsScriptBackend', () => {
     const client = new AppsScriptBackend(endpoint, { fetchImplementation });
 
     const availability = await client.getAvailability({
+      schoolId: 'SCHOOL-1',
       laboratoryId: 'LAB01',
       date: '2026-08-10',
     });
 
     expect(availability.periods[0]?.reservation).toEqual({ id: 'RES-1' });
+    const [requestedUrl] = fetchImplementation.mock.calls[0]!;
+    expect(requestedUrl).toBeInstanceOf(URL);
+    if (!(requestedUrl instanceof URL)) {
+      throw new TypeError('A disponibilidade deve chamar fetch com uma URL normalizada.');
+    }
+    expect(requestedUrl.searchParams.get('school')).toBe('SCHOOL-1');
   });
 
   it('preserva os erros funcionais retornados pelo servidor', async () => {
@@ -142,7 +156,11 @@ describe('AppsScriptBackend', () => {
     const client = new AppsScriptBackend(endpoint, { fetchImplementation });
 
     await expect(
-      client.getAvailability({ laboratoryId: 'LAB01', date: '2026-08-10' }),
+      client.getAvailability({
+        schoolId: 'SCHOOL-1',
+        laboratoryId: 'LAB01',
+        date: '2026-08-10',
+      }),
     ).rejects.toMatchObject({ code: 'TIME_CONFLICT', message: 'Horário ocupado.' });
   });
 
@@ -150,5 +168,13 @@ describe('AppsScriptBackend', () => {
     expect(() => new AppsScriptBackend('https://example.com/collect')).toThrow(
       /Google Apps Script/i,
     );
+  });
+
+  it('rejeita um link público sem escola antes de chamar o backend', () => {
+    const fetchImplementation = vi.fn<typeof window.fetch>();
+    const client = new AppsScriptBackend(endpoint, { fetchImplementation });
+
+    expect(() => client.getBootstrapData()).toThrow(/link.*incompleto/i);
+    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,8 @@ interface GoogleSheetsTestState {
   >;
   spreadsheetId: string | null;
   spreadsheetUrl: string | null;
+  publicSchoolReady: boolean;
+  publicSchoolError: string | null;
   error: string | null;
 }
 
@@ -42,6 +44,8 @@ const googleSheetsState = vi.hoisted((): GoogleSheetsTestState => ({
     vi.fn<(configuration: AdminConfiguration) => Promise<GoogleSheetsSyncResult>>(),
   spreadsheetId: 'planilha-existente',
   spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/planilha-existente/edit',
+  publicSchoolReady: true,
+  publicSchoolError: null,
   error: null,
 }));
 
@@ -59,6 +63,17 @@ function renderApp(route: string, client: BackendClient) {
       <App client={client} />
     </MemoryRouter>,
   );
+}
+
+async function createConfiguredMockBackend(): Promise<MockBackend> {
+  const seed = new MockBackend({ latencyMs: 0 });
+  const configuration = await seed.getAdminConfiguration();
+  configuration.laboratorySettings = configuration.laboratorySettings.map((settings, index) => ({
+    ...settings,
+    responsibleName: `Responsável ${index + 1}`,
+    responsibleEmail: `responsavel${index + 1}@escola.gov.br`,
+  }));
+  return new MockBackend({ latencyMs: 0, configuration });
 }
 
 describe('painel do gerenciador', () => {
@@ -83,6 +98,8 @@ describe('painel do gerenciador', () => {
     googleSheetsState.spreadsheetId = 'planilha-existente';
     googleSheetsState.spreadsheetUrl =
       'https://docs.google.com/spreadsheets/d/planilha-existente/edit';
+    googleSheetsState.publicSchoolReady = true;
+    googleSheetsState.publicSchoolError = null;
     googleSheetsState.error = null;
   });
 
@@ -519,11 +536,26 @@ describe('painel do gerenciador', () => {
   });
 
   it('libera os QR Codes assim que os dados já estão salvos no Sheets', async () => {
-    const client = new MockBackend({ latencyMs: 0 });
+    const client = await createConfiguredMockBackend();
 
     renderApp('/gerenciar/geral', client);
 
     expect(await screen.findAllByRole('button', { name: 'Baixar QR Code' })).toHaveLength(3);
+  });
+
+  it('aguarda o registro automático da escola antes de liberar seus QR Codes', async () => {
+    googleSheetsState.publicSchoolReady = false;
+    const client = new MockBackend({ latencyMs: 0 });
+
+    renderApp('/gerenciar/geral', client);
+
+    expect(await screen.findAllByRole('button', { name: 'Salvar e gerar QR Code' })).toHaveLength(
+      3,
+    );
+    expect(screen.queryByRole('button', { name: 'Baixar QR Code' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Web App|SPREADSHEET_ID|compartilhe a planilha/i),
+    ).not.toBeInTheDocument();
   });
 
   it('salva somente os dados principais e gera o acesso antes das demais configurações', async () => {
@@ -561,8 +593,8 @@ describe('painel do gerenciador', () => {
     });
   });
 
-  it('não bloqueia o QR Code por configuração técnica do serviço público', async () => {
-    const client = new MockBackend({ latencyMs: 0 });
+  it('não expõe configuração técnica quando o acesso público está pronto', async () => {
+    const client = await createConfiguredMockBackend();
 
     renderApp('/gerenciar/geral', client);
 
@@ -627,9 +659,9 @@ describe('painel do gerenciador', () => {
     await user.type(schoolName, 'Escola com nova tentativa');
     await user.click(screen.getByRole('button', { name: 'Salvar alterações' }));
 
-    expect(
-      await screen.findByText(/não foi possível confirmar as alterações no Google Sheets/i),
-    ).toHaveTextContent('Falha temporária no Google.');
+    expect(await screen.findByText(/acesso público ainda não foi confirmado/i)).toHaveTextContent(
+      'Falha temporária no Google.',
+    );
     expect(saveLocal).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Salvar alterações' }));
@@ -641,6 +673,54 @@ describe('painel do gerenciador', () => {
     ).toBeInTheDocument();
     expect(googleSheetsState.syncConfiguration).toHaveBeenCalledTimes(2);
     expect(saveLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it('retoma automaticamente uma configuração já escrita quando a publicação falha depois', async () => {
+    const user = userEvent.setup();
+    const source = new MockBackend({ latencyMs: 0 });
+    const initialConfiguration = await source.getAdminConfiguration();
+    let configurationAlreadyWritten: AdminConfiguration | null = null;
+    googleSheetsState.loadLinkedConfiguration.mockImplementation(() =>
+      Promise.resolve(configurationAlreadyWritten ?? initialConfiguration),
+    );
+    googleSheetsState.syncConfiguration
+      .mockImplementationOnce((configurationToSync) => {
+        configurationAlreadyWritten = structuredClone(configurationToSync);
+        return Promise.reject(new Error('O vínculo público falhou depois da escrita.'));
+      })
+      .mockResolvedValueOnce({
+        spreadsheetId: 'planilha-existente',
+        spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/planilha-existente/edit',
+        created: false,
+        verified: true,
+      });
+    const client: BackendClient = {
+      getBootstrapData: (params) => source.getBootstrapData(params),
+      getAvailability: (request) => source.getAvailability(request),
+      createReservation: (request) => source.createReservation(request),
+    };
+
+    renderApp('/gerenciar/geral', client);
+    const schoolName = await screen.findByLabelText('Nome da escola');
+    await user.clear(schoolName);
+    await user.type(schoolName, 'Escola recuperada automaticamente');
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+
+    expect(await screen.findByText(/acesso público ainda não foi confirmado/i)).toHaveTextContent(
+      'O vínculo público falhou depois da escrita.',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Salvar alterações' }));
+
+    expect(
+      await screen.findByText(
+        'Configurações salvas, sincronizadas e verificadas no Google Sheets.',
+      ),
+    ).toBeInTheDocument();
+    expect(googleSheetsState.syncConfiguration).toHaveBeenCalledTimes(2);
+    expect(googleSheetsState.syncConfiguration.mock.calls[1]?.[0].revision).toBe(
+      googleSheetsState.syncConfiguration.mock.calls[0]?.[0].revision,
+    );
   });
 
   it('limita imediatamente uma quantidade extrema de aulas', async () => {

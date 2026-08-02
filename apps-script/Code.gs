@@ -10,12 +10,19 @@ function doGet(event) {
     var parameters = event && event.parameter ? event.parameter : {};
     var action = requiredQueryParameter_(parameters, 'action');
 
+    if (action === 'serviceInfo') {
+      return serviceInfo_();
+    }
+
     if (action === 'bootstrap') {
-      return getBootstrapData_(optionalText_(parameters.lab));
+      return getBootstrapData_(
+        requiredQueryParameter_(parameters, 'school'),
+        optionalText_(parameters.lab),
+      );
     }
 
     if (action === 'availability') {
-      return getAvailability_({
+      return getAvailability_(requiredQueryParameter_(parameters, 'school'), {
         laboratoryId: requiredQueryParameter_(parameters, 'laboratoryId'),
         date: requiredQueryParameter_(parameters, 'date'),
       });
@@ -45,14 +52,21 @@ function doPost(event) {
     if (!isPlainObject_(payload)) {
       throwApiError_('BAD_REQUEST', 'O corpo do pedido deve ser um objeto JSON.');
     }
-    if (payload.action !== 'createReservation') {
-      throwApiError_('UNKNOWN_ACTION', 'A ação POST informada não existe.');
-    }
-    if (!isPlainObject_(payload.request)) {
-      throwApiError_('BAD_REQUEST', 'Informe a reserva em request.');
+    if (payload.action === 'registerSchool') {
+      if (!isPlainObject_(payload.request)) {
+        throwApiError_('BAD_REQUEST', 'Informe os dados da escola em request.');
+      }
+      return registerSchool_(payload.request);
     }
 
-    return createReservation_(payload.request);
+    if (payload.action === 'createReservation') {
+      if (!isPlainObject_(payload.request)) {
+        throwApiError_('BAD_REQUEST', 'Informe a reserva em request.');
+      }
+      return createReservation_(requiredText_(payload.school, 'school', 128), payload.request);
+    }
+
+    throwApiError_('UNKNOWN_ACTION', 'A ação POST informada não existe.');
   });
 }
 

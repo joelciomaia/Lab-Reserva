@@ -239,7 +239,7 @@ async function requestGoogleApi<T>(
         'SYNC_FAILED',
         apiMessage
           ? `O Google Sheets recusou a operação: ${apiMessage}`
-          : 'O Google Sheets recusou a operação. Confirme se a API está habilitada e tente novamente.',
+          : 'O Google Sheets recusou a operação. Entre novamente e, se o problema continuar, avise o responsável pelo aplicativo.',
       );
     }
     if (response.status === 404) {
