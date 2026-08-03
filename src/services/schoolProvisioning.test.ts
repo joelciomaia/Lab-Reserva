@@ -9,7 +9,7 @@ vi.mock('../integrations/google/googleDrive', () => ({
   ensureSpreadsheetWriterAccess: driveMocks.ensureSpreadsheetWriterAccess,
 }));
 
-import { provisionSchoolWorkspace } from './schoolProvisioning';
+import { ensureGoogleChatBackendReady, provisionSchoolWorkspace } from './schoolProvisioning';
 
 const endpoint = 'https://script.google.com/macros/s/DEPLOYMENT_ID/exec';
 
@@ -177,5 +177,51 @@ describe('provisionSchoolWorkspace', () => {
       }),
     ).rejects.toThrow(/acesso público.*não foi configurado/i);
     expect(driveMocks.ensureSpreadsheetWriterAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe('ensureGoogleChatBackendReady', () => {
+  it('confirma a implantação somente quando o backend correto possui o Chat configurado', async () => {
+    const fetchImplementation = vi.fn<typeof window.fetch>(() =>
+      Promise.resolve(
+        jsonResponse({
+          ok: true,
+          data: {
+            backendAccountEmail: 'backend@agenda.edu.br',
+            googleChatConfigured: true,
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      ensureGoogleChatBackendReady({
+        appsScriptUrl: endpoint,
+        expectedBackendAccountEmail: 'backend@agenda.edu.br',
+        fetchImplementation,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('impede a conexão quando a credencial do app do Chat ainda não foi instalada', async () => {
+    const fetchImplementation = vi.fn<typeof window.fetch>(() =>
+      Promise.resolve(
+        jsonResponse({
+          ok: true,
+          data: {
+            backendAccountEmail: 'backend@agenda.edu.br',
+            googleChatConfigured: false,
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      ensureGoogleChatBackendReady({
+        appsScriptUrl: endpoint,
+        expectedBackendAccountEmail: 'backend@agenda.edu.br',
+        fetchImplementation,
+      }),
+    ).rejects.toThrow(/Google Chat ainda não foi ativado/i);
   });
 });

@@ -1,13 +1,20 @@
-import type { GoogleIdentityWindow, GoogleTokenResponse } from './googleIdentity.types';
-
-export type {
+import type {
   GoogleIdentityWindow,
-  GoogleTokenClient,
   GoogleTokenClientConfig,
   GoogleTokenResponse,
 } from './googleIdentity.types';
 
+export type {
+  GoogleIdentityWindow,
+  GoogleOAuthPrompt,
+  GoogleTokenClient,
+  GoogleTokenClientConfig,
+  GoogleTokenClientOverrideConfig,
+  GoogleTokenResponse,
+} from './googleIdentity.types';
+
 export const GOOGLE_DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const GOOGLE_CHAT_SPACES_CREATE_SCOPE = 'https://www.googleapis.com/auth/chat.spaces.create';
 export const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
 
 const GOOGLE_IDENTITY_SCRIPT_ID = 'google-identity-services';
@@ -105,9 +112,21 @@ export interface GoogleAccessToken {
   grantedScope: string;
 }
 
-export async function requestGoogleSheetsAccessToken(
-  clientId = getGoogleClientId(),
-): Promise<GoogleAccessToken> {
+interface GoogleAccessTokenRequest {
+  clientId: string;
+  scopes: readonly string[];
+  prompt: 'consent' | 'select_account';
+  includeGrantedScopes?: boolean;
+  missingPermissionMessage: string;
+}
+
+async function requestGoogleAccessToken({
+  clientId,
+  scopes,
+  prompt,
+  includeGrantedScopes,
+  missingPermissionMessage,
+}: GoogleAccessTokenRequest): Promise<GoogleAccessToken> {
   await loadGoogleIdentityServices();
 
   return new Promise<GoogleAccessToken>((resolve, reject) => {
@@ -117,9 +136,9 @@ export async function requestGoogleSheetsAccessToken(
       return;
     }
 
-    const tokenClient = oauth2.initTokenClient({
+    const tokenClientConfig: GoogleTokenClientConfig = {
       client_id: clientId,
-      scope: GOOGLE_DRIVE_FILE_SCOPE,
+      scope: scopes.join(' '),
       callback: (response) => {
         if (response.error || !response.access_token) {
           reject(new Error(getAuthorizationErrorMessage(response)));
@@ -127,12 +146,8 @@ export async function requestGoogleSheetsAccessToken(
         }
 
         const grantedScopes = (response.scope ?? '').split(/\s+/).filter(Boolean);
-        if (!grantedScopes.includes(GOOGLE_DRIVE_FILE_SCOPE)) {
-          reject(
-            new Error(
-              'A permissão para criar e editar os arquivos do Lab Reserva não foi concedida.',
-            ),
-          );
+        if (!scopes.every((scope) => grantedScopes.includes(scope))) {
+          reject(new Error(missingPermissionMessage));
           return;
         }
 
@@ -154,8 +169,39 @@ export async function requestGoogleSheetsAccessToken(
               : 'Não foi possível abrir a autorização do Google.';
         reject(new Error(message));
       },
-    });
+    };
 
-    tokenClient.requestAccessToken({ prompt: 'select_account' });
+    if (includeGrantedScopes !== undefined) {
+      tokenClientConfig.include_granted_scopes = includeGrantedScopes;
+    }
+
+    const tokenClient = oauth2.initTokenClient(tokenClientConfig);
+
+    tokenClient.requestAccessToken({ prompt });
+  });
+}
+
+export function requestGoogleSheetsAccessToken(
+  clientId = getGoogleClientId(),
+): Promise<GoogleAccessToken> {
+  return requestGoogleAccessToken({
+    clientId,
+    scopes: [GOOGLE_DRIVE_FILE_SCOPE],
+    prompt: 'select_account',
+    missingPermissionMessage:
+      'A permissão para criar e editar os arquivos do Lab Reserva não foi concedida.',
+  });
+}
+
+export function requestGoogleChatAccessToken(
+  clientId = getGoogleClientId(),
+): Promise<GoogleAccessToken> {
+  return requestGoogleAccessToken({
+    clientId,
+    scopes: [GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_CHAT_SPACES_CREATE_SCOPE],
+    prompt: 'consent',
+    includeGrantedScopes: true,
+    missingPermissionMessage:
+      'A permissão para conectar o Lab Reserva ao Google Chat não foi concedida.',
   });
 }

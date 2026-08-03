@@ -14,7 +14,10 @@ import type {
   CancelReservationPeriodsRequest,
   ManagedReservation,
 } from '../../types';
-import { provisionSchoolWorkspace } from '../../services/schoolProvisioning';
+import {
+  ensureGoogleChatBackendReady,
+  provisionSchoolWorkspace,
+} from '../../services/schoolProvisioning';
 import {
   GoogleDriveIntegrationError,
   getAccessibleSpreadsheet,
@@ -22,7 +25,13 @@ import {
   tagLabReservaSpreadsheet,
   type LabReservaSpreadsheet,
 } from './googleDrive';
-import { loadGoogleIdentityServices, requestGoogleSheetsAccessToken } from './googleIdentity';
+import { setupPrivateGoogleChat } from './googleChat';
+import {
+  loadGoogleIdentityServices,
+  requestGoogleChatAccessToken,
+  requestGoogleSheetsAccessToken,
+  type GoogleAccessToken,
+} from './googleIdentity';
 import {
   GoogleSheetsIntegrationError,
   initializeEmptyGoogleSheetsWorkspace,
@@ -48,6 +57,7 @@ export type GoogleSheetsStatus =
   | 'idle'
   | 'loading-script'
   | 'authorizing'
+  | 'connecting-chat'
   | 'discovering'
   | 'creating-spreadsheet'
   | 'selecting-spreadsheet'
@@ -62,8 +72,13 @@ export interface GoogleAuthorizationOptions {
   createNewSchool?: boolean;
 }
 
+export interface GooglePrivateChatConnection {
+  spaceName: string;
+}
+
 export interface GoogleSheetsContextValue {
   authorize: (options?: GoogleAuthorizationOptions) => Promise<void>;
+  connectPrivateGoogleChat: () => Promise<GooglePrivateChatConnection>;
   isAuthorized: boolean;
   status: GoogleSheetsStatus;
   loadLinkedConfiguration: () => Promise<AdminConfiguration | null>;
@@ -109,6 +124,23 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
       tokenExpirationTimerRef.current = null;
     }
   }, []);
+
+  const rememberAccessToken = useCallback(
+    (authorization: GoogleAccessToken) => {
+      clearTokenExpirationTimer();
+      accessTokenRef.current = authorization.accessToken;
+      tokenExpirationTimerRef.current = window.setTimeout(() => {
+        accessTokenRef.current = null;
+        tokenExpirationTimerRef.current = null;
+        setIsAuthorized(false);
+        setPublicSchoolReady(false);
+        setPublicSchoolError(null);
+        setAvailableSpreadsheets([]);
+        setStatus('idle');
+      }, authorization.expiresInSeconds * 1000);
+    },
+    [clearTokenExpirationTimer],
+  );
 
   const forgetAccessToken = useCallback(() => {
     clearTokenExpirationTimer();
@@ -206,20 +238,9 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
         setStatus('authorizing');
         const authorization = await requestGoogleSheetsAccessToken();
 
-        clearTokenExpirationTimer();
-        accessTokenRef.current = authorization.accessToken;
+        rememberAccessToken(authorization);
         setIsAuthorized(false);
         setStatus('discovering');
-
-        tokenExpirationTimerRef.current = window.setTimeout(() => {
-          accessTokenRef.current = null;
-          tokenExpirationTimerRef.current = null;
-          setIsAuthorized(false);
-          setPublicSchoolReady(false);
-          setPublicSchoolError(null);
-          setAvailableSpreadsheets([]);
-          setStatus('idle');
-        }, authorization.expiresInSeconds * 1000);
 
         if (options.createNewSchool) {
           await startNewSchool();
@@ -306,8 +327,47 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
         throw authorizationError;
       }
     },
-    [clearTokenExpirationTimer, forgetAccessToken, startNewSchool],
+    [forgetAccessToken, rememberAccessToken, startNewSchool],
   );
+
+  const connectPrivateGoogleChat = useCallback(async (): Promise<GooglePrivateChatConnection> => {
+    const currentSpreadsheetId = spreadsheetId;
+    if (!currentSpreadsheetId || !accessTokenRef.current) {
+      throw new GoogleSheetsIntegrationError(
+        'AUTHORIZATION_REQUIRED',
+        'Entre com o Google e selecione a planilha da escola antes de ativar o Google Chat.',
+      );
+    }
+
+    setError(null);
+    setStatus('connecting-chat');
+    try {
+      await ensureGoogleChatBackendReady();
+      await loadGoogleIdentityServices();
+      const authorization = await requestGoogleChatAccessToken();
+      const spreadsheet = await getAccessibleSpreadsheet(currentSpreadsheetId, {
+        accessToken: authorization.accessToken,
+      });
+      if (!spreadsheet) {
+        throw new GoogleSheetsIntegrationError(
+          'AUTHORIZATION_REQUIRED',
+          'Use a mesma Conta do Google vinculada a esta escola para ativar o Google Chat.',
+        );
+      }
+
+      const space = await setupPrivateGoogleChat({
+        accessToken: authorization.accessToken,
+      });
+      rememberAccessToken(authorization);
+      setIsAuthorized(true);
+      setStatus('authorized');
+      return { spaceName: space.name };
+    } catch (connectionError: unknown) {
+      setError(errorMessage(connectionError));
+      setStatus(accessTokenRef.current ? 'authorized' : 'error');
+      throw connectionError;
+    }
+  }, [rememberAccessToken, spreadsheetId]);
 
   const syncConfiguration = useCallback(
     async (configuration: AdminConfiguration): Promise<GoogleSheetsSyncResult> => {
@@ -526,6 +586,7 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
   const value = useMemo<GoogleSheetsContextValue>(
     () => ({
       authorize,
+      connectPrivateGoogleChat,
       isAuthorized,
       status,
       loadLinkedConfiguration,
@@ -543,6 +604,7 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
     }),
     [
       authorize,
+      connectPrivateGoogleChat,
       availableSpreadsheets,
       error,
       isAuthorized,

@@ -14,7 +14,10 @@ const googleMocks = vi.hoisted(() => ({
   tagLabReservaSpreadsheet: vi.fn(),
   loadGoogleIdentityServices: vi.fn(),
   readAdminConfigurationWithMetadataFromGoogleSheets: vi.fn(),
+  requestGoogleChatAccessToken: vi.fn(),
   requestGoogleSheetsAccessToken: vi.fn(),
+  setupPrivateGoogleChat: vi.fn(),
+  ensureGoogleChatBackendReady: vi.fn(),
   provisionSchoolWorkspace: vi.fn(),
   syncAdminConfigurationToGoogleSheets: vi.fn(),
 }));
@@ -31,10 +34,16 @@ vi.mock('./googleDrive', async (importOriginal) => {
 
 vi.mock('./googleIdentity', () => ({
   loadGoogleIdentityServices: googleMocks.loadGoogleIdentityServices,
+  requestGoogleChatAccessToken: googleMocks.requestGoogleChatAccessToken,
   requestGoogleSheetsAccessToken: googleMocks.requestGoogleSheetsAccessToken,
 }));
 
+vi.mock('./googleChat', () => ({
+  setupPrivateGoogleChat: googleMocks.setupPrivateGoogleChat,
+}));
+
 vi.mock('../../services/schoolProvisioning', () => ({
+  ensureGoogleChatBackendReady: googleMocks.ensureGoogleChatBackendReady,
   provisionSchoolWorkspace: googleMocks.provisionSchoolWorkspace,
 }));
 
@@ -78,7 +87,7 @@ const configuration = {
       sedIntegrationEnabled: true,
       sedLinkLeadMinutes: 10,
       googleChatEnabled: true,
-      googleChatSpaceName: 'Agendamentos do laboratório',
+      googleChatSpaceName: 'spaces/AAAA-provider-test',
       sendSedLinkToChat: true,
     },
   ],
@@ -109,6 +118,12 @@ function Probe() {
       <output data-testid="error">{integration.error ?? 'sem-erro'}</output>
       <button type="button" onClick={() => void integration.authorize()}>
         autorizar
+      </button>
+      <button
+        type="button"
+        onClick={() => void integration.connectPrivateGoogleChat().catch(() => undefined)}
+      >
+        conectar chat
       </button>
       <button
         type="button"
@@ -159,6 +174,16 @@ describe('GoogleSheetsProvider', () => {
       expiresInSeconds: 3600,
       grantedScope: 'https://www.googleapis.com/auth/drive.file',
     });
+    googleMocks.requestGoogleChatAccessToken.mockReset().mockResolvedValue({
+      accessToken: 'token-chat-e-drive',
+      expiresInSeconds: 3600,
+      grantedScope:
+        'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/chat.spaces.create',
+    });
+    googleMocks.setupPrivateGoogleChat.mockReset().mockResolvedValue({
+      name: 'spaces/AAAA-private-chat',
+    });
+    googleMocks.ensureGoogleChatBackendReady.mockReset().mockResolvedValue(undefined);
     googleMocks.provisionSchoolWorkspace.mockReset().mockResolvedValue({
       schoolId: configuration.school.id,
       spreadsheetId: 'sheet-created',
@@ -285,6 +310,76 @@ describe('GoogleSheetsProvider', () => {
       revision: 'configuration-1',
     });
     expect(screen.getByTestId('public-ready')).toHaveTextContent('true');
+  });
+
+  it('cria a conversa privada somente com a mesma conta vinculada à planilha', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(GOOGLE_SPREADSHEET_STORAGE_KEY, 'sheet-existing');
+    googleMocks.getAccessibleSpreadsheet.mockResolvedValue({
+      id: 'sheet-existing',
+      name: 'Lab Reserva - Escola',
+      modifiedTime: '2026-07-26T10:00:00.000Z',
+      webViewLink: 'https://docs.google.com/spreadsheets/d/sheet-existing/edit',
+      appProperties: { type: 'lab-reserva-config', version: '1' },
+    });
+
+    render(
+      <GoogleSheetsProvider>
+        <Probe />
+      </GoogleSheetsProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'autorizar' }));
+    await user.click(screen.getByRole('button', { name: 'conectar chat' }));
+
+    await waitFor(() => {
+      expect(googleMocks.setupPrivateGoogleChat).toHaveBeenCalledWith({
+        accessToken: 'token-chat-e-drive',
+      });
+    });
+    expect(googleMocks.ensureGoogleChatBackendReady).toHaveBeenCalledTimes(1);
+    expect(googleMocks.getAccessibleSpreadsheet).toHaveBeenLastCalledWith('sheet-existing', {
+      accessToken: 'token-chat-e-drive',
+    });
+    expect(screen.getByTestId('authorized')).toHaveTextContent('true');
+    expect(screen.getByTestId('status')).toHaveTextContent('authorized');
+  });
+
+  it('preserva a sessão do Sheets quando outra conta é escolhida ao conectar o Chat', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(GOOGLE_SPREADSHEET_STORAGE_KEY, 'sheet-existing');
+    googleMocks.getAccessibleSpreadsheet
+      .mockResolvedValueOnce({
+        id: 'sheet-existing',
+        name: 'Lab Reserva - Escola',
+        modifiedTime: '2026-07-26T10:00:00.000Z',
+        webViewLink: 'https://docs.google.com/spreadsheets/d/sheet-existing/edit',
+        appProperties: { type: 'lab-reserva-config', version: '1' },
+      })
+      .mockResolvedValueOnce(null);
+
+    render(
+      <GoogleSheetsProvider>
+        <Probe />
+      </GoogleSheetsProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'autorizar' }));
+    await user.click(screen.getByRole('button', { name: 'conectar chat' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error')).toHaveTextContent(/mesma Conta do Google/i);
+    });
+    expect(googleMocks.setupPrivateGoogleChat).not.toHaveBeenCalled();
+    expect(screen.getByTestId('authorized')).toHaveTextContent('true');
+    expect(screen.getByTestId('status')).toHaveTextContent('authorized');
+
+    await user.click(screen.getByRole('button', { name: 'sincronizar' }));
+    expect(googleMocks.syncAdminConfigurationToGoogleSheets).toHaveBeenLastCalledWith(
+      configuration,
+      {
+        accessToken: 'token-somente-memoria',
+        spreadsheetId: 'sheet-existing',
+      },
+    );
   });
 
   it('mantém o painel disponível quando somente a publicação falha ao carregar', async () => {

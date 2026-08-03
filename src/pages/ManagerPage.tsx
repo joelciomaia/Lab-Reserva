@@ -7,6 +7,7 @@ import {
   Check,
   ClipboardList,
   GraduationCap,
+  MessageCircle,
   Plus,
   QrCode,
   RotateCcw,
@@ -25,6 +26,7 @@ import {
   DEFAULT_BOOKING_FORM_CONFIGURATION,
   DEFAULT_SED_SC_CONFIGURATION,
   getShiftEndTime,
+  isGoogleChatSpaceName,
   isDeferredSetupValidationIssue,
   validateAdminConfiguration,
 } from '../domain/configuration';
@@ -213,11 +215,24 @@ function SectionHeading({
   );
 }
 
-export function ManagerPage() {
+export interface GoogleChatActivationResult {
+  spaceName: string;
+}
+
+export type GoogleChatActivationCallback = (
+  laboratoryId: string,
+) => Promise<GoogleChatActivationResult>;
+
+export interface ManagerPageProps {
+  onActivateGoogleChat?: GoogleChatActivationCallback;
+}
+
+export function ManagerPage({ onActivateGoogleChat }: ManagerPageProps) {
   const { section } = useParams<{ section: string }>();
   const { client, reload } = useBootstrap();
   const {
     cancelReservationPeriods,
+    connectPrivateGoogleChat,
     listReservations,
     loadLinkedConfiguration,
     publicSchoolError,
@@ -226,6 +241,7 @@ export function ManagerPage() {
     spreadsheetUrl,
     syncConfiguration,
   } = useGoogleSheets();
+  const activateGoogleChat = onActivateGoogleChat ?? (async () => await connectPrivateGoogleChat());
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [savedConfiguration, setSavedConfiguration] = useState<AdminConfiguration | null>(null);
   const [draft, setDraft] = useState<AdminConfigurationDraft | null>(null);
@@ -584,6 +600,7 @@ export function ManagerPage() {
                     validationIssues={validationIssues}
                     publicLinksEnabled={publicLinksEnabled}
                     publicLinksMessage={publicLinksMessage}
+                    onActivateGoogleChat={activateGoogleChat}
                     onSaveAndGenerateQrCode={(laboratoryId) => void saveChanges(laboratoryId)}
                   />
                 ) : null}
@@ -674,6 +691,7 @@ interface GeneralSectionProps extends ConfigurationSectionProps {
   validationIssues: ReturnType<typeof validateAdminConfiguration>;
   publicLinksEnabled: boolean;
   publicLinksMessage: string;
+  onActivateGoogleChat: GoogleChatActivationCallback;
   onSaveAndGenerateQrCode: (laboratoryId: string) => void;
 }
 
@@ -684,11 +702,60 @@ function GeneralSection({
   validationIssues,
   publicLinksEnabled,
   publicLinksMessage,
+  onActivateGoogleChat,
   onSaveAndGenerateQrCode,
 }: GeneralSectionProps) {
   const [openLaboratoryIds, setOpenLaboratoryIds] = useState<ReadonlySet<string>>(
     () => new Set(draft.laboratories[0] ? [draft.laboratories[0].id] : []),
   );
+  const [activatingChatLaboratoryId, setActivatingChatLaboratoryId] = useState<string | null>(null);
+  const [chatConnectionErrors, setChatConnectionErrors] = useState<
+    Readonly<Record<string, string | undefined>>
+  >({});
+
+  function clearChatConnectionError(laboratoryId: string) {
+    setChatConnectionErrors((current) => ({ ...current, [laboratoryId]: undefined }));
+  }
+
+  async function activateGoogleChat(laboratoryId: string) {
+    setActivatingChatLaboratoryId(laboratoryId);
+    clearChatConnectionError(laboratoryId);
+    try {
+      const result = await onActivateGoogleChat(laboratoryId);
+      const spaceName = result.spaceName.trim();
+      if (!isGoogleChatSpaceName(spaceName)) {
+        throw new Error('O Google não retornou uma conversa privada válida. Tente novamente.');
+      }
+      changeDraft((current) =>
+        updateLaboratorySettings(current, laboratoryId, (currentSettings) => ({
+          ...currentSettings,
+          googleChatEnabled: true,
+          googleChatSpaceName: spaceName,
+        })),
+      );
+    } catch (error: unknown) {
+      setChatConnectionErrors((current) => ({
+        ...current,
+        [laboratoryId]:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Não foi possível ativar o Google Chat. Tente novamente.',
+      }));
+    } finally {
+      setActivatingChatLaboratoryId(null);
+    }
+  }
+
+  function deactivateGoogleChat(laboratoryId: string) {
+    clearChatConnectionError(laboratoryId);
+    changeDraft((current) =>
+      updateLaboratorySettings(current, laboratoryId, (currentSettings) => ({
+        ...currentSettings,
+        googleChatEnabled: false,
+        googleChatSpaceName: '',
+      })),
+    );
+  }
 
   function addLaboratory() {
     const laboratoryId = createGeneratedId('LAB');
@@ -757,6 +824,10 @@ function GeneralSection({
               ) ?? createDefaultLaboratoryAdminConfiguration(laboratory.id);
             const laboratoryNumber = index + 1;
             const hasMainData = hasQuickAccessMainData(draft, laboratory.id);
+            const isGoogleChatConnected =
+              settings.googleChatEnabled && isGoogleChatSpaceName(settings.googleChatSpaceName);
+            const isActivatingGoogleChat = activatingChatLaboratoryId === laboratory.id;
+            const chatConnectionError = chatConnectionErrors[laboratory.id];
             const canSaveAndGenerateQrCode = hasMainData && !hasQuickAccessBlockingIssues;
             const quickAccessMessage = !hasMainData
               ? 'Informe o nome da escola, o nome do laboratório, o responsável e um e-mail válido.'
@@ -858,13 +929,17 @@ function GeneralSection({
                         type="email"
                         value={settings.responsibleEmail}
                         maxLength={180}
+                        disabled={isActivatingGoogleChat}
                         placeholder="nome@escola.gov.br"
                         onChange={(event) => {
                           const responsibleEmail = event.currentTarget.value;
+                          clearChatConnectionError(laboratory.id);
                           changeDraft((current) =>
                             updateLaboratorySettings(current, laboratory.id, (currentSettings) => ({
                               ...currentSettings,
                               responsibleEmail,
+                              googleChatEnabled: false,
+                              googleChatSpaceName: '',
                             })),
                           );
                         }}
@@ -1222,77 +1297,61 @@ function GeneralSection({
                         </label>
                       </div>
                       <div className={styles.optionCard}>
-                        <label className={styles.toggle}>
-                          <input
-                            type="checkbox"
-                            checked={settings.googleChatEnabled}
-                            onChange={(event) => {
-                              const googleChatEnabled = event.currentTarget.checked;
-                              changeDraft((current) =>
-                                updateLaboratorySettings(
-                                  current,
-                                  laboratory.id,
-                                  (currentSettings) => ({
-                                    ...currentSettings,
-                                    googleChatEnabled,
-                                  }),
-                                ),
-                              );
-                            }}
-                          />
-                          Preparar notificações pelo Google Chat
-                        </label>
-                        <label className={styles.field}>
-                          <span>Nome do espaço no Google Chat</span>
-                          <input
-                            className={controlStyles.control}
-                            value={settings.googleChatSpaceName}
-                            maxLength={120}
-                            disabled={!settings.googleChatEnabled}
-                            placeholder="Ex.: Agendamentos do laboratório"
-                            onChange={(event) => {
-                              const googleChatSpaceName = event.currentTarget.value;
-                              changeDraft((current) =>
-                                updateLaboratorySettings(
-                                  current,
-                                  laboratory.id,
-                                  (currentSettings) => ({
-                                    ...currentSettings,
-                                    googleChatSpaceName,
-                                  }),
-                                ),
-                              );
-                            }}
-                          />
-                        </label>
-                        <label className={styles.toggle}>
-                          <input
-                            type="checkbox"
-                            checked={settings.sendSedLinkToChat}
+                        <div className={styles.chatConnectionHeading}>
+                          <span className={styles.chatConnectionIcon} aria-hidden="true">
+                            <MessageCircle size={20} />
+                          </span>
+                          <div>
+                            <strong>Google Chat privado</strong>
+                            <p>Receba os avisos diretamente na sua conversa com o Lab Reserva.</p>
+                          </div>
+                        </div>
+                        <p
+                          className={styles.chatConnectionStatus}
+                          data-connected={isGoogleChatConnected || undefined}
+                          role="status"
+                        >
+                          {isGoogleChatConnected ? (
+                            <>
+                              <Check size={17} aria-hidden="true" />
+                              Conversa privada conectada
+                            </>
+                          ) : (
+                            'Google Chat ainda não conectado'
+                          )}
+                        </p>
+                        {isGoogleChatConnected ? (
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            onClick={() => deactivateGoogleChat(laboratory.id)}
+                          >
+                            Desativar Google Chat
+                          </Button>
+                        ) : (
+                          <Button
+                            size="small"
+                            isLoading={isActivatingGoogleChat}
+                            loadingLabel="Conectando…"
                             disabled={
-                              !settings.googleChatEnabled || !settings.sedIntegrationEnabled
+                              activatingChatLaboratoryId !== null && !isActivatingGoogleChat
                             }
-                            onChange={(event) => {
-                              const sendSedLinkToChat = event.currentTarget.checked;
-                              changeDraft((current) =>
-                                updateLaboratorySettings(
-                                  current,
-                                  laboratory.id,
-                                  (currentSettings) => ({
-                                    ...currentSettings,
-                                    sendSedLinkToChat,
-                                  }),
-                                ),
-                              );
-                            }}
-                          />
-                          Enviar o link pré-preenchido da SED-SC neste espaço
-                        </label>
+                            onClick={() => void activateGoogleChat(laboratory.id)}
+                          >
+                            <MessageCircle size={17} aria-hidden="true" />
+                            Ativar Google Chat
+                          </Button>
+                        )}
+                        {chatConnectionError ? (
+                          <p className={styles.chatConnectionError} role="alert">
+                            {chatConnectionError}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <p className={styles.securityNote}>
-                      O webhook não será salvo na planilha. A conexão segura será feita quando o
-                      backend do Apps Script estiver disponível.
+                      A conversa será sempre privada. Nenhum token do Google Chat será salvo na
+                      planilha.
                     </p>
                   </div>
                 </div>

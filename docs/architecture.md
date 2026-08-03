@@ -105,13 +105,15 @@ Ao confirmar:
 
 ### Autorização
 
-O `GoogleSheetsProvider` usa o [token model do Google Identity Services](https://developers.google.com/identity/oauth2/web/guides/use-token-model). O OAuth Client ID é lido de `VITE_GOOGLE_CLIENT_ID`, configurado em `.env.local`, e o único escopo solicitado é:
+O `GoogleSheetsProvider` usa o [token model do Google Identity Services](https://developers.google.com/identity/oauth2/web/guides/use-token-model). O OAuth Client ID é lido de `VITE_GOOGLE_CLIENT_ID`, configurado em `.env.local`, e o login inicial solicita somente:
 
 ```text
 https://www.googleapis.com/auth/drive.file
 ```
 
 Esse escopo permite criar e operar somente os arquivos que o aplicativo criou ou que o usuário escolheu com ele. A Google Drive API é usada para encontrar e marcar esses arquivos; a Google Sheets API lê e atualiza as células. Ambas precisam estar habilitadas no projeto Google Cloud. O access token é mantido em memória e nunca é persistido no `localStorage` ou no `sessionStorage`. Recarregar a aplicação exige nova autorização. Não há Client Secret no frontend.
+
+Ao ativar as notificações, o provider solicita incrementalmente `chat.spaces.create` junto com `drive.file`, verifica a planilha corrente com o novo token e chama `spaces.setup` com `DIRECT_MESSAGE` e `singleUserBotDm=true`. Assim, a conta errada não é conectada e nunca é criado um grupo. O frontend persiste somente o recurso `spaces/{id}` no Sheets. O envio posterior usa autenticação do app no Apps Script com `chat.bot`; a chave da service account nunca chega ao navegador.
 
 O Client ID é uma configuração central da implantação, não uma credencial por escola. Um único Client ID atende todas as contas que usam a mesma origem; ambientes diferentes podem ter Client IDs separados. Para receber novos laboratoristas sem cadastrá-los individualmente, a tela de consentimento deve ter audiência **External** e estado **In production**. As origens JavaScript são mantidas centralmente no cliente OAuth.
 
@@ -164,7 +166,7 @@ Planilhas legadas sem `RECURSOS` ou sem `EXIBIR_OBSERVACOES` continuam legíveis
 
 ## Backend público
 
-O Web App em `apps-script/` executa como uma conta central e mantém em Script Properties um registro imutável e reverso entre o ID público da escola e a planilha que foi compartilhada automaticamente com essa conta. Não existe fallback para `SPREADSHEET_ID`. Bootstrap, disponibilidade e criação exigem `school`; a resolução valida o mapa reverso e também `CONFIGURACOES.ID_ESCOLA` antes de abrir os dados. O serviço usa `LockService` para registrar vínculos e revalidar conflitos, e grava reservas com UUID. A disponibilidade pública retorna apenas a ocupação e o ID técnico da reserva, sem professor, turma ou disciplina. Cancelamentos administrativos usam o token Google do laboratorista e são acrescentados diretamente em `CANCELAMENTOS`; não existe endpoint público de exclusão. A criação pública não possui autenticação ou limitação de taxa nativas e precisa de uma camada antiautomação antes de exposição ampla.
+O Web App em `apps-script/` executa como uma conta central e mantém em Script Properties um registro imutável e reverso entre o ID público da escola e a planilha que foi compartilhada automaticamente com essa conta. Não existe fallback para `SPREADSHEET_ID`. Bootstrap, disponibilidade e criação exigem `school`; a resolução valida o mapa reverso e também `CONFIGURACOES.ID_ESCOLA` antes de abrir os dados. O serviço usa `LockService` para registrar vínculos e revalidar conflitos, e grava reservas com UUID. Depois de confirmar a gravação e liberar o lock, tenta enviar a notificação para a DM configurada; uma falha do Chat é apenas registrada e nunca invalida nem duplica a reserva. A disponibilidade pública retorna apenas a ocupação e o ID técnico da reserva, sem professor, turma ou disciplina. Cancelamentos administrativos usam o token Google do laboratorista e são acrescentados diretamente em `CANCELAMENTOS`; não existe endpoint público de exclusão. A criação pública não possui autenticação ou limitação de taxa nativas e precisa de uma camada antiautomação antes de exposição ampla.
 
 O `MockBackend` permanece exclusivamente nos testes por injeção explícita. Sem `VITE_GOOGLE_APPS_SCRIPT_URL`, a aplicação informa que a agenda real ainda não foi conectada.
 

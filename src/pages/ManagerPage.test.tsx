@@ -15,6 +15,7 @@ import type {
 
 interface GoogleSheetsTestState {
   authorize: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  connectPrivateGoogleChat: ReturnType<typeof vi.fn<() => Promise<{ spaceName: string }>>>;
   isAuthorized: boolean;
   status: string;
   loadLinkedConfiguration: ReturnType<typeof vi.fn<() => Promise<AdminConfiguration | null>>>;
@@ -34,6 +35,7 @@ interface GoogleSheetsTestState {
 
 const googleSheetsState = vi.hoisted((): GoogleSheetsTestState => ({
   authorize: vi.fn<() => Promise<void>>(),
+  connectPrivateGoogleChat: vi.fn<() => Promise<{ spaceName: string }>>(),
   isAuthorized: true,
   status: 'authorized',
   loadLinkedConfiguration: vi.fn<() => Promise<AdminConfiguration | null>>(),
@@ -76,6 +78,17 @@ async function createConfiguredMockBackend(): Promise<MockBackend> {
   return new MockBackend({ latencyMs: 0, configuration });
 }
 
+async function createChatConnectedMockBackend(): Promise<MockBackend> {
+  const seed = await createConfiguredMockBackend();
+  const configuration = await seed.getAdminConfiguration();
+  configuration.laboratorySettings[0] = {
+    ...configuration.laboratorySettings[0]!,
+    googleChatEnabled: true,
+    googleChatSpaceName: 'spaces/AAAA-connected',
+  };
+  return new MockBackend({ latencyMs: 0, configuration });
+}
+
 describe('painel do gerenciador', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -83,6 +96,9 @@ describe('painel do gerenciador', () => {
 
   beforeEach(() => {
     googleSheetsState.authorize.mockReset();
+    googleSheetsState.connectPrivateGoogleChat.mockReset().mockResolvedValue({
+      spaceName: 'spaces/AAAA-laboratorio-1',
+    });
     googleSheetsState.isAuthorized = true;
     googleSheetsState.status = 'authorized';
     googleSheetsState.loadLinkedConfiguration.mockReset().mockResolvedValue(null);
@@ -378,15 +394,8 @@ describe('painel do gerenciador', () => {
     const sedLeadTime = firstLaboratory.getByLabelText(/Enviar o link antes da primeira aula/);
     await user.clear(sedLeadTime);
     await user.type(sedLeadTime, '15');
-    await user.click(
-      firstLaboratory.getByRole('checkbox', {
-        name: 'Preparar notificações pelo Google Chat',
-      }),
-    );
-    await user.type(
-      firstLaboratory.getByLabelText('Nome do espaço no Google Chat'),
-      'Agendamentos do laboratório 1',
-    );
+    await user.click(firstLaboratory.getByRole('button', { name: 'Ativar Google Chat' }));
+    expect(await firstLaboratory.findByText('Conversa privada conectada')).toBeInTheDocument();
 
     await user.click(secondLaboratoryElement.querySelector('summary')!);
     const secondLaboratory = within(secondLaboratoryElement);
@@ -424,7 +433,7 @@ describe('painel do gerenciador', () => {
       sedIntegrationEnabled: true,
       sedLinkLeadMinutes: 15,
       googleChatEnabled: true,
-      googleChatSpaceName: 'Agendamentos do laboratório 1',
+      googleChatSpaceName: 'spaces/AAAA-laboratorio-1',
       sendSedLinkToChat: true,
     });
     expect(secondSettings).toMatchObject({
@@ -439,6 +448,53 @@ describe('painel do gerenciador', () => {
 
     const [syncedConfiguration] = googleSheetsState.syncConfiguration.mock.calls.at(-1) ?? [];
     expect(syncedConfiguration?.laboratorySettings).toEqual(savedConfiguration.laboratorySettings);
+  });
+
+  it('mostra a falha de autorização do Chat sem marcar o laboratório como conectado', async () => {
+    const user = userEvent.setup();
+    const client = await createConfiguredMockBackend();
+    googleSheetsState.connectPrivateGoogleChat.mockRejectedValueOnce(
+      new Error('A permissão do Google Chat não foi concedida.'),
+    );
+
+    renderApp('/gerenciar/geral', client);
+
+    await screen.findByRole('heading', { name: 'Geral', level: 2 });
+    const firstLaboratory = within(document.querySelectorAll('details')[0] as HTMLElement);
+    await user.click(firstLaboratory.getByRole('button', { name: 'Ativar Google Chat' }));
+
+    expect(
+      await firstLaboratory.findByText('A permissão do Google Chat não foi concedida.'),
+    ).toHaveAttribute('role', 'alert');
+    expect(firstLaboratory.getByText('Google Chat ainda não conectado')).toBeInTheDocument();
+    expect(firstLaboratory.queryByText('Conversa privada conectada')).not.toBeInTheDocument();
+  });
+
+  it('desativa o Chat e invalida a conversa quando o e-mail responsável muda', async () => {
+    const user = userEvent.setup();
+    const client = await createChatConnectedMockBackend();
+
+    renderApp('/gerenciar/geral', client);
+
+    await screen.findByRole('heading', { name: 'Geral', level: 2 });
+    const firstLaboratory = within(document.querySelectorAll('details')[0] as HTMLElement);
+    expect(firstLaboratory.getByText('Conversa privada conectada')).toBeInTheDocument();
+    expect(
+      firstLaboratory.queryByLabelText('Nome do espaço no Google Chat'),
+    ).not.toBeInTheDocument();
+
+    await user.click(firstLaboratory.getByRole('button', { name: 'Desativar Google Chat' }));
+    expect(firstLaboratory.getByText('Google Chat ainda não conectado')).toBeInTheDocument();
+
+    await user.click(firstLaboratory.getByRole('button', { name: 'Ativar Google Chat' }));
+    expect(await firstLaboratory.findByText('Conversa privada conectada')).toBeInTheDocument();
+
+    const responsibleEmail = firstLaboratory.getByLabelText('E-mail do responsável 1');
+    await user.clear(responsibleEmail);
+    await user.type(responsibleEmail, 'novo.responsavel@escola.gov.br');
+
+    expect(firstLaboratory.getByText('Google Chat ainda não conectado')).toBeInTheDocument();
+    expect(firstLaboratory.getByRole('button', { name: 'Ativar Google Chat' })).toBeInTheDocument();
   });
 
   it('edita e salva os dados fixos da integração com a SED-SC', async () => {

@@ -15,7 +15,8 @@ Script Property `SPREADSHEET_ID`.
 4. Implante como **Aplicativo da Web**, executando como o proprietário e com acesso
    para qualquer pessoa. Em uma atualização, crie uma nova versão da implantação.
 5. Consulte `GET ?action=serviceInfo`. A resposta deve conter o e-mail da conta que
-   executa o backend em `backendAccountEmail`.
+   executa o backend em `backendAccountEmail` e informa em `googleChatConfigured` se
+   as credenciais opcionais do Google Chat foram reconhecidas.
 6. Configure esse mesmo e-mail no frontend em
    `VITE_GOOGLE_APPS_SCRIPT_ACCOUNT_EMAIL`. Uma divergência impede o
    compartilhamento da planilha.
@@ -24,6 +25,47 @@ Normalmente o e-mail é obtido de `Session.getEffectiveUser()`. Se a implantaç�
 o disponibilizar, configure uma única Script Property global chamada
 `BACKEND_ACCOUNT_EMAIL`. Se o valor configurado divergir da conta efetiva, o serviço
 recusa a operação para evitar que planilhas sejam compartilhadas com a conta errada.
+
+## Notificações privadas pelo Google Chat
+
+As notificações de novas reservas usam a Google Chat API e são enviadas como o app
+Lab Reserva. Não há webhook por escola e nenhuma credencial é enviada ao navegador
+ou gravada nas planilhas.
+
+Para configurar o backend:
+
+1. use o mesmo projeto Google Cloud do OAuth Client do frontend;
+2. habilite e configure a Google Chat API, deixando o app disponível para as contas
+   que participarão do piloto;
+3. crie uma service account nesse projeto para representar o Chat app;
+4. no Apps Script, crie a Script Property `GOOGLE_CHAT_SERVICE_ACCOUNT_JSON` com o
+   conteúdo integral do JSON da service account;
+5. publique uma nova versão do Web App e autorize o uso de conexões externas;
+6. confirme que `serviceInfo.googleChatConfigured` retorna `true`.
+
+A chave privada é um segredo: não a inclua no Git, no frontend ou no Google Sheets.
+Somente editores confiáveis devem ter acesso ao projeto Apps Script. Rotacione a
+chave imediatamente se ela for exposta.
+
+Cada laboratório só recebe avisos quando `AVISAR_NOVA_RESERVA` e `CHAT_ATIVO` estão
+ativados e `CHAT_ESPACO` contém o resource name de uma conversa direta no formato
+`spaces/...`. Essa conversa privada precisa ter sido criada previamente entre o
+laboratorista e o Chat app. O backend usa o escopo de app `chat.bot`, mantém o token
+de curta duração no `CacheService` e usa o ID da reserva como `requestId` para evitar
+mensagens duplicadas em uma repetição da mesma chamada à API. Antes do primeiro envio,
+o backend também consulta os metadados e exige `DIRECT_MESSAGE` com
+`singleUserBotDm`; essa validação é mantida temporariamente no cache. Assim, editar a
+planilha manualmente para apontar a um espaço ou conversa em grupo não desvia os
+avisos para um destino público.
+
+O envio acontece somente depois que a linha foi confirmada em `RESERVAS` e fora do
+`LockService`. Falhas ou indisponibilidade do Chat são registradas nos logs, mas não
+desfazem nem fazem a API reportar falha para uma reserva já salva.
+
+Cancelamentos continuam sendo registrados diretamente em `CANCELAMENTOS` pelo fluxo
+administrativo autenticado. Este Web App público não possui endpoint de notificação
+de cancelamento, evitando que chamadas anônimas sejam usadas para forjar ou disparar
+mensagens.
 
 ## Registro automático de uma escola
 
@@ -99,6 +141,18 @@ sincronização administrativa ou, sob trava, durante a criação de uma reserva
   }
   ```
 
+`serviceInfo` responde com:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "backendAccountEmail": "backend@escola.edu.br",
+    "googleChatConfigured": true
+  }
+}
+```
+
 Toda resposta usa `{"ok":true,"data":...}` ou
 `{"ok":false,"error":{"code":"...","message":"..."}}`. O ContentService
 não permite controlar status HTTP nem cabeçalhos CORS; por isso o cliente deve
@@ -112,6 +166,11 @@ agente pode consumir cotas criando planilhas próprias e tentando registrá-las.
 um piloto, monitore cotas, Script Properties e novas linhas em `RESERVAS`. Antes de
 abrir o serviço amplamente, proteja a implantação com rate limiting e mitigação de
 automação.
+
+Cada conversa direta também está sujeita às cotas da Google Chat API. O envio de
+mensagens é intencionalmente best-effort; consulte os logs do Apps Script para
+diagnosticar respostas HTTP da autenticação ou do Chat sem expor tokens nas respostas
+públicas.
 
 Script Properties possuem cota total e o `LockService` é compartilhado por todas as
 escolas desta implantação. Esse registro é adequado ao piloto e a um número moderado

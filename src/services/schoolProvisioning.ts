@@ -17,6 +17,7 @@ type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
 interface ServiceInfo {
   backendAccountEmail: string;
+  googleChatConfigured: boolean;
 }
 
 interface RegistrationResult {
@@ -36,6 +37,8 @@ export interface ProvisionSchoolWorkspaceOptions {
   expectedBackendAccountEmail?: string;
   fetchImplementation?: typeof window.fetch;
 }
+
+export type GoogleChatBackendOptions = ProvisionSchoolWorkspaceOptions;
 
 export interface ProvisionedSchoolWorkspace {
   schoolId: string;
@@ -143,7 +146,36 @@ async function getServiceInfo(
       'O serviço público não informou uma conta válida para vincular a planilha.',
     );
   }
-  return { backendAccountEmail };
+  return {
+    backendAccountEmail,
+    googleChatConfigured: result.googleChatConfigured === true,
+  };
+}
+
+/**
+ * Confere se a implantação central está pronta para enviar mensagens como
+ * o app do Google Chat. Nenhuma credencial do app é exposta ao navegador.
+ */
+export async function ensureGoogleChatBackendReady(
+  options: GoogleChatBackendOptions = {},
+): Promise<void> {
+  const endpoint = configuredEndpoint(options.appsScriptUrl);
+  const expectedBackendAccountEmail = configuredBackendAccountEmail(
+    options.expectedBackendAccountEmail,
+  );
+  const fetchImplementation = resolveFetch(options.fetchImplementation);
+  const serviceInfo = await getServiceInfo(endpoint, fetchImplementation);
+
+  if (serviceInfo.backendAccountEmail !== expectedBackendAccountEmail) {
+    throw new SchoolProvisioningError(
+      'O serviço público não corresponde à conta central configurada para esta implantação.',
+    );
+  }
+  if (!serviceInfo.googleChatConfigured) {
+    throw new SchoolProvisioningError(
+      'O envio pelo Google Chat ainda não foi ativado na implantação central do Lab Reserva.',
+    );
+  }
 }
 
 async function registerSchool(

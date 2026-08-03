@@ -36,13 +36,15 @@ As alterações são publicadas no Google Sheets. Depois da autorização Google
 
 ## Integração Google para várias escolas
 
-Os botões principais da landing page apontam diretamente para `/gerenciar/entrar`. O acesso discreto da agenda continua apontando para `/gerenciar/geral`; sem autorização ativa, essa rota protegida também encaminha para a tela de entrada e, depois do login, retorna ao painel. O botão **Entrar com Google** usa o [token model do Google Identity Services (GIS)](https://developers.google.com/identity/oauth2/web/guides/use-token-model) e solicita um único escopo:
+Os botões principais da landing page apontam diretamente para `/gerenciar/entrar`. O acesso discreto da agenda continua apontando para `/gerenciar/geral`; sem autorização ativa, essa rota protegida também encaminha para a tela de entrada e, depois do login, retorna ao painel. O botão **Entrar com Google** usa o [token model do Google Identity Services (GIS)](https://developers.google.com/identity/oauth2/web/guides/use-token-model) e solicita inicialmente um único escopo:
 
 ```text
 https://www.googleapis.com/auth/drive.file
 ```
 
 Esse escopo limita o aplicativo aos arquivos que ele criou ou que o usuário abriu/escolheu com ele; não concede leitura geral do Google Drive. A mesma autorização permite usar a Drive API para localizar os arquivos do Lab Reserva e a Sheets API para ler e escrever seu conteúdo. O access token existe somente em memória. Ele não é gravado no `localStorage` nem no `sessionStorage`; após recarregar a página ou perder a autorização, o laboratorista precisa autorizar novamente.
+
+O Google Chat é opcional e usa autorização incremental. Somente ao clicar em **Ativar Google Chat** o aplicativo solicita `https://www.googleapis.com/auth/chat.spaces.create`, confirma que a mesma conta ainda acessa a planilha e cria ou recupera uma conversa direta entre o laboratorista e o app. O identificador `spaces/...` é salvo na configuração; tokens e credenciais não são persistidos.
 
 O Client ID pertence ao aplicativo implantado, não à escola. Portanto, cada ambiente normalmente possui um único Client ID centralizado — por exemplo, um para desenvolvimento e outro para produção — e esse mesmo Client ID atende todos os laboratoristas e escolas que acessarem aquela origem. O usuário final não precisa criar projeto Google Cloud, Client ID ou credenciais.
 
@@ -52,8 +54,8 @@ O Web App também é implantado uma única vez. Em cada novo acesso, o aplicativ
 
 Essa configuração é feita uma vez por quem publica o sistema:
 
-1. No Google Cloud, crie ou selecione um projeto e habilite a **Google Sheets API** e a **Google Drive API**.
-2. Configure a tela de consentimento com audiência **External**. Durante o desenvolvimento, mantenha o aplicativo em teste e cadastre os testadores; para atender livremente novas escolas, publique-o como **In production**.
+1. No Google Cloud, crie ou selecione um projeto e habilite a **Google Sheets API**, a **Google Drive API** e a **Google Chat API**.
+2. Configure a tela de consentimento com audiência **External** e adicione o escopo sensível `chat.spaces.create`. Durante o desenvolvimento, mantenha o aplicativo em teste e cadastre os testadores; para atender livremente novas escolas, publique-o como **In production** e conclua a verificação exigida pelo Google.
 3. Crie um [OAuth Client ID do tipo Web application](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
 4. Cadastre centralmente todas as origens JavaScript autorizadas daquele ambiente, como `http://localhost:5173` e `https://agenda.exemplo.org`. Informe apenas esquema, domínio e porta, sem caminhos, hash ou barra final.
 5. Crie um arquivo `.env.local` na raiz:
@@ -103,7 +105,7 @@ No mesmo salvamento, a aplicação consulta a conta central do Web App, concede 
 
 Ao abrir uma planilha criada antes dessa estrutura, a integração usa o catálogo padrão de recursos, mantém observações ocultas e realiza uma migração automática única para materializar a nova aba e a nova chave, sem limpar nem sobrescrever `RESERVAS`.
 
-O Google Agenda continua opcional. Para a agenda pública, publique o projeto de `apps-script/` conforme [`apps-script/README.md`](apps-script/README.md) e configure uma única vez `VITE_GOOGLE_APPS_SCRIPT_URL` e `VITE_GOOGLE_APPS_SCRIPT_ACCOUNT_EMAIL`. O segundo valor fixa a conta institucional esperada; o frontend não compartilha planilhas se o Web App responder com outro e-mail.
+O Google Agenda continua opcional. Para a agenda pública e as notificações privadas, publique o projeto de `apps-script/` conforme [`apps-script/README.md`](apps-script/README.md) e configure uma única vez `VITE_GOOGLE_APPS_SCRIPT_URL` e `VITE_GOOGLE_APPS_SCRIPT_ACCOUNT_EMAIL`. O segundo valor fixa a conta institucional esperada; o frontend não compartilha planilhas se o Web App responder com outro e-mail. A chave da service account do Chat fica exclusivamente nas Script Properties desse backend.
 
 ## Executar localmente
 

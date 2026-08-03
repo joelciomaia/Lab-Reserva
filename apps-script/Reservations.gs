@@ -205,7 +205,7 @@ function validateCreateRequest_(request) {
 
 function createReservation_(school, rawRequest) {
   var request = validateCreateRequest_(rawRequest);
-  return withScriptLock_(function () {
+  var created = withScriptLock_(function () {
     var spreadsheet = spreadsheetForSchool_(school);
     ensureOperationalSheetsUnlocked_(spreadsheet);
     var configuration = readConfiguration_(spreadsheet);
@@ -291,6 +291,17 @@ function createReservation_(school, rawRequest) {
       serializeList_(reservation.periodTimes),
     ]);
     SpreadsheetApp.flush();
-    return reservation;
+    return {
+      reservation: reservation,
+      schoolName: configuration.school.name,
+      laboratory: laboratory,
+    };
   });
+
+  notifyNewReservationBestEffort_({
+    reservation: created.reservation,
+    schoolName: created.schoolName,
+    laboratory: created.laboratory,
+  });
+  return created.reservation;
 }

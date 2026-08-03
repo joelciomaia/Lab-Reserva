@@ -100,7 +100,7 @@ const configuration: AdminConfiguration = {
       sedIntegrationEnabled: true,
       sedLinkLeadMinutes: 10,
       googleChatEnabled: true,
-      googleChatSpaceName: 'Agendamentos do laboratório',
+      googleChatSpaceName: 'spaces/AAAA',
       sendSedLinkToChat: true,
     },
     {
@@ -387,7 +387,7 @@ describe('sincronização com Google Sheets', () => {
         true,
         10,
         true,
-        'Agendamentos do laboratório',
+        'spaces/AAAA',
         true,
       ],
       [

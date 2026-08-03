@@ -271,7 +271,10 @@ function backendAccountEmail_() {
 }
 
 function serviceInfo_() {
-  return { backendAccountEmail: backendAccountEmail_() };
+  return {
+    backendAccountEmail: backendAccountEmail_(),
+    googleChatConfigured: googleChatConfigured_(),
+  };
 }
 
 function assertBackendWriterAccess_(spreadsheetId) {

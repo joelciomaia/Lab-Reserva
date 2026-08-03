@@ -8,15 +8,23 @@ export interface GoogleTokenResponse {
   error_uri?: string;
 }
 
+export type GoogleOAuthPrompt = '' | 'none' | 'consent' | 'select_account';
+
+export interface GoogleTokenClientOverrideConfig {
+  scope?: string;
+  include_granted_scopes?: boolean;
+  prompt?: GoogleOAuthPrompt;
+}
+
 export interface GoogleTokenClient {
-  requestAccessToken(overrideConfig?: {
-    prompt?: '' | 'none' | 'consent' | 'select_account';
-  }): void;
+  requestAccessToken(overrideConfig?: GoogleTokenClientOverrideConfig): void;
 }
 
 export interface GoogleTokenClientConfig {
   client_id: string;
   scope: string;
+  include_granted_scopes?: boolean;
+  prompt?: GoogleOAuthPrompt;
   callback: (response: GoogleTokenResponse) => void;
   error_callback?: (error: { type?: string; message?: string }) => void;
 }

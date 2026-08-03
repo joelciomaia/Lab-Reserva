@@ -384,6 +384,10 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+export function isGoogleChatSpaceName(value: string): boolean {
+  return /^spaces\/[A-Za-z0-9_-]+$/.test(value.trim());
+}
+
 function isValidHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -540,10 +544,10 @@ export function validateAdminConfiguration(
         message: `Informe o e-mail do responsável por ${laboratoryName}.`,
       });
     }
-    if (settings.googleChatEnabled && !settings.googleChatSpaceName.trim()) {
+    if (settings.googleChatEnabled && !isGoogleChatSpaceName(settings.googleChatSpaceName)) {
       issues.push({
         path: `${path}.googleChatSpaceName`,
-        message: `Informe o espaço do Google Chat usado por ${laboratoryName}.`,
+        message: `Ative novamente a conversa privada do Google Chat de ${laboratoryName}.`,
       });
     }
   });

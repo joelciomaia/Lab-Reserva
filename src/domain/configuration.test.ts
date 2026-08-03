@@ -6,6 +6,7 @@ import {
   createDefaultLaboratoryAdminConfiguration,
   DEFAULT_SED_SC_CONFIGURATION,
   isDeferredSetupValidationIssue,
+  isGoogleChatSpaceName,
   validateAdminConfiguration,
 } from './configuration';
 
@@ -300,7 +301,7 @@ describe('validateAdminConfiguration', () => {
       sedIntegrationEnabled: true,
       sedLinkLeadMinutes: 1441,
       googleChatEnabled: true,
-      googleChatSpaceName: '',
+      googleChatSpaceName: 'Agendamentos do laboratório',
     };
     configuration.sedSc = {
       ...configuration.sedSc,
@@ -340,7 +341,7 @@ describe('validateAdminConfiguration', () => {
         },
         {
           path: 'laboratorySettings.0.googleChatSpaceName',
-          message: 'Informe o espaço do Google Chat usado por Laboratório de Teste.',
+          message: 'Ative novamente a conversa privada do Google Chat de Laboratório de Teste.',
         },
         {
           path: 'sedSc.formUrl',
@@ -360,6 +361,14 @@ describe('validateAdminConfiguration', () => {
         },
       ]),
     );
+  });
+
+  it('accepts only canonical Google Chat space resource names', () => {
+    expect(isGoogleChatSpaceName('spaces/AAAA-123_test')).toBe(true);
+    expect(isGoogleChatSpaceName('  spaces/AAAA  ')).toBe(true);
+    expect(isGoogleChatSpaceName('Agendamentos do laboratório')).toBe(false);
+    expect(isGoogleChatSpaceName('spaces/')).toBe(false);
+    expect(isGoogleChatSpaceName('spaces/AAAA/threads/1')).toBe(false);
   });
 
   it('allows the same responsible e-mail in independent laboratories', () => {

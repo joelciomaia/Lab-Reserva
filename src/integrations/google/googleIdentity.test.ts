@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  GOOGLE_CHAT_SPACES_CREATE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_IDENTITY_SCRIPT_URL,
   loadGoogleIdentityServices,
+  requestGoogleChatAccessToken,
   requestGoogleSheetsAccessToken,
 } from './googleIdentity';
 import type {
@@ -78,7 +80,73 @@ describe('Google Identity Services', () => {
       client_id: 'client-id.apps.googleusercontent.com',
       scope: GOOGLE_DRIVE_FILE_SCOPE,
     });
+    expect(receivedConfig).not.toHaveProperty('include_granted_scopes');
     expect(requestAccessToken).toHaveBeenCalledWith({ prompt: 'select_account' });
+  });
+
+  it('pede os escopos do Sheets e do Chat somente na autorização incremental', async () => {
+    let receivedConfig: GoogleTokenClientConfig | null = null;
+    const requestAccessToken = vi.fn();
+    const grantedScope = `${GOOGLE_DRIVE_FILE_SCOPE} ${GOOGLE_CHAT_SPACES_CREATE_SCOPE}`;
+    (window as GoogleIdentityWindow).google = {
+      accounts: {
+        oauth2: {
+          initTokenClient: vi.fn((config: GoogleTokenClientConfig) => {
+            receivedConfig = config;
+            return {
+              requestAccessToken: (
+                overrideConfig: Parameters<GoogleTokenClient['requestAccessToken']>[0],
+              ) => {
+                requestAccessToken(overrideConfig);
+                config.callback({
+                  access_token: 'token-chat-memory-only',
+                  expires_in: 1800,
+                  scope: grantedScope,
+                  token_type: 'Bearer',
+                });
+              },
+            };
+          }),
+        },
+      },
+    };
+
+    await expect(
+      requestGoogleChatAccessToken('client-id.apps.googleusercontent.com'),
+    ).resolves.toEqual({
+      accessToken: 'token-chat-memory-only',
+      expiresInSeconds: 1800,
+      grantedScope,
+    });
+    expect(receivedConfig).toMatchObject({
+      client_id: 'client-id.apps.googleusercontent.com',
+      scope: grantedScope,
+      include_granted_scopes: true,
+    });
+    expect(requestAccessToken).toHaveBeenCalledWith({ prompt: 'consent' });
+  });
+
+  it('não ativa o Chat quando o usuário concede somente acesso aos arquivos', async () => {
+    (window as GoogleIdentityWindow).google = {
+      accounts: {
+        oauth2: {
+          initTokenClient: vi.fn((config: GoogleTokenClientConfig) => ({
+            requestAccessToken: () => {
+              config.callback({
+                access_token: 'token-sem-chat',
+                expires_in: 3600,
+                scope: GOOGLE_DRIVE_FILE_SCOPE,
+                token_type: 'Bearer',
+              });
+            },
+          })),
+        },
+      },
+    };
+
+    await expect(
+      requestGoogleChatAccessToken('client-id.apps.googleusercontent.com'),
+    ).rejects.toThrow('A permissão para conectar o Lab Reserva ao Google Chat não foi concedida.');
   });
 
   it('recusa continuar quando a permissão aos arquivos do aplicativo não foi concedida', async () => {

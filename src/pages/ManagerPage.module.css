@@ -380,6 +380,60 @@
   border-radius: var(--radius-sm);
 }
 
+.chatConnectionHeading {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.chatConnectionHeading strong {
+  display: block;
+  margin-block-end: var(--space-1);
+}
+
+.optionCard .chatConnectionHeading p {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.chatConnectionIcon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  color: var(--color-info);
+  background: var(--color-info-surface);
+  border-radius: var(--radius-pill);
+  place-items: center;
+}
+
+.optionCard .chatConnectionStatus {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: fit-content;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-muted);
+  background: var(--color-surface-subtle);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+}
+
+.optionCard .chatConnectionStatus[data-connected='true'] {
+  color: var(--color-success);
+  background: var(--color-success-surface);
+}
+
+.optionCard .chatConnectionError {
+  padding: var(--space-2);
+  color: var(--color-danger);
+  background: var(--color-danger-surface);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
 .securityNote {
   padding: var(--space-3);
   background: var(--color-warning-surface);

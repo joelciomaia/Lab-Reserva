@@ -123,7 +123,7 @@ function createProjectedConfiguration(): AdminConfigurationDraft {
         pastBookingLimitDays: 60,
         sedIntegrationEnabled: true,
         googleChatEnabled: true,
-        googleChatSpaceName: 'Agendamentos do laboratório ativo',
+        googleChatSpaceName: 'spaces/AAAA-active',
       },
       {
         ...createDefaultLaboratoryAdminConfiguration('LAB-INACTIVE'),

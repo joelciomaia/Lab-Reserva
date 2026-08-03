@@ -96,6 +96,17 @@ function readLaboratories_(table) {
       id: id,
       name: name,
       active: booleanCell_(tableCell_(table, row, 'ATIVO'), location + ' (ATIVO)', false),
+      notifyOnNewBooking: booleanCell_(
+        tableCell_(table, row, 'AVISAR_NOVA_RESERVA'),
+        location + ' (AVISAR_NOVA_RESERVA)',
+        true,
+      ),
+      googleChatEnabled: booleanCell_(
+        tableCell_(table, row, 'CHAT_ATIVO'),
+        location + ' (CHAT_ATIVO)',
+        false,
+      ),
+      googleChatSpaceName: cellText_(tableCell_(table, row, 'CHAT_ESPACO')),
     });
   }
   return result;
@@ -311,9 +322,17 @@ function activeLaboratory_(configuration, laboratoryId) {
 function getBootstrapData_(school, preselectedLaboratoryId) {
   var spreadsheet = spreadsheetForSchool_(school);
   var configuration = readConfiguration_(spreadsheet);
-  var activeLaboratories = configuration.laboratories.filter(function (laboratory) {
-    return laboratory.active;
-  });
+  var activeLaboratories = configuration.laboratories
+    .filter(function (laboratory) {
+      return laboratory.active;
+    })
+    .map(function (laboratory) {
+      return {
+        id: laboratory.id,
+        name: laboratory.name,
+        active: laboratory.active,
+      };
+    });
   var data = {
     school: configuration.school,
     laboratories: activeLaboratories,
