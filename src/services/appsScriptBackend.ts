@@ -32,11 +32,6 @@ interface ApiFailure {
 
 type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
-interface CachedAvailability {
-  response: AvailabilityResponse;
-  expiresAt: number;
-}
-
 interface AvailabilityWaiter {
   resolve: (response: AvailabilityResponse) => void;
   reject: (error: unknown) => void;
@@ -49,8 +44,6 @@ interface PendingAvailabilityBatch {
   waitersByDate: Map<string, AvailabilityWaiter[]>;
   timerId: number;
 }
-
-const AVAILABILITY_CACHE_TTL_MS = 30_000;
 
 const APP_ERROR_CODES = new Set<AppErrorCode>([
   'VALIDATION_ERROR',
@@ -181,7 +174,6 @@ export interface AppsScriptBackendOptions {
 export class AppsScriptBackend implements BackendClient {
   private readonly endpoint: string;
   private readonly fetchImplementation: typeof window.fetch | undefined;
-  private readonly availabilityCache = new Map<string, CachedAvailability>();
   private readonly pendingAvailabilityBatches = new Map<string, PendingAvailabilityBatch>();
 
   constructor(endpoint: string, options: AppsScriptBackendOptions = {}) {
@@ -284,43 +276,8 @@ export class AppsScriptBackend implements BackendClient {
     }
   }
 
-  private availabilityKey(schoolId: string, laboratoryId: string, date: string): string {
-    return `${schoolId}\u0000${laboratoryId}\u0000${date}`;
-  }
-
   private availabilityBatchKey(schoolId: string, laboratoryId: string): string {
     return `${schoolId}\u0000${laboratoryId}`;
-  }
-
-  private readCachedAvailability(
-    schoolId: string,
-    laboratoryId: string,
-    date: string,
-  ): AvailabilityResponse | null {
-    const key = this.availabilityKey(schoolId, laboratoryId, date);
-    const cached = this.availabilityCache.get(key);
-    if (!cached) {
-      return null;
-    }
-    if (cached.expiresAt <= Date.now()) {
-      this.availabilityCache.delete(key);
-      return null;
-    }
-    return cached.response;
-  }
-
-  private cacheAvailability(schoolId: string, response: AvailabilityResponse): void {
-    this.availabilityCache.set(
-      this.availabilityKey(schoolId, response.laboratoryId, response.date),
-      {
-        response,
-        expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
-      },
-    );
-  }
-
-  private clearAvailabilityCache(schoolId: string, laboratoryId: string, date: string): void {
-    this.availabilityCache.delete(this.availabilityKey(schoolId, laboratoryId, date));
   }
 
   private async fetchAvailabilityBatch(
@@ -374,7 +331,6 @@ export class AppsScriptBackend implements BackendClient {
           waiters.forEach(({ reject }) => reject(error));
           return;
         }
-        this.cacheAvailability(batch.schoolId, response);
         waiters.forEach(({ resolve }) => resolve(response));
       });
     } catch (error: unknown) {
@@ -394,10 +350,6 @@ export class AppsScriptBackend implements BackendClient {
 
   getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse> {
     const schoolId = requirePublicSchoolId(request.schoolId);
-    const cached = this.readCachedAvailability(schoolId, request.laboratoryId, request.date);
-    if (cached) {
-      return Promise.resolve(cached);
-    }
 
     return new Promise<AvailabilityResponse>((resolve, reject) => {
       const batchKey = this.availabilityBatchKey(schoolId, request.laboratoryId);
@@ -428,17 +380,11 @@ export class AppsScriptBackend implements BackendClient {
   async createReservation(request: CreateReservationRequest): Promise<Reservation> {
     const { schoolId, ...reservationRequest } = request;
     const normalizedSchoolId = requirePublicSchoolId(schoolId);
-    const reservation = await this.post<Reservation>({
+    return this.post<Reservation>({
       action: 'createReservation',
       school: normalizedSchoolId,
       request: reservationRequest,
     });
-    this.clearAvailabilityCache(
-      normalizedSchoolId,
-      reservationRequest.laboratoryId,
-      reservationRequest.date,
-    );
-    return reservation;
   }
 }
 
