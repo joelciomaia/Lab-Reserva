@@ -15,32 +15,27 @@ function doGet(event) {
     }
 
     if (action === 'bootstrap') {
-      return getBootstrapData_(
+      return getFastBootstrapData_(
         requiredQueryParameter_(parameters, 'school'),
         optionalText_(parameters.lab),
       );
     }
 
+    if (action === 'bookingOptions') {
+      return getBookingOptionsData_(requiredQueryParameter_(parameters, 'school'));
+    }
+
     if (action === 'availability') {
-      return getAvailability_(requiredQueryParameter_(parameters, 'school'), {
+      return getFastAvailability_(requiredQueryParameter_(parameters, 'school'), {
         laboratoryId: requiredQueryParameter_(parameters, 'laboratoryId'),
         date: requiredQueryParameter_(parameters, 'date'),
       });
     }
 
     if (action === 'weekAvailability') {
-      return getWeekAvailability_(requiredQueryParameter_(parameters, 'school'), {
+      return getFastWeekAvailability_(requiredQueryParameter_(parameters, 'school'), {
         laboratoryId: requiredQueryParameter_(parameters, 'laboratoryId'),
         dates: splitList_(requiredQueryParameter_(parameters, 'dates')),
-      });
-    }
-
-    if (action === 'diagnostics') {
-      return runDiagnostics_(requiredQueryParameter_(parameters, 'school'), {
-        mode: optionalText_(parameters.mode),
-        preselectedLaboratoryId: optionalText_(parameters.lab),
-        laboratoryId: optionalText_(parameters.laboratoryId),
-        dates: splitList_(optionalText_(parameters.dates)),
       });
     }
 
@@ -119,36 +114,29 @@ function dispatchReadPayload_(payload) {
   }
 
   if (payload.action === 'bootstrap') {
-    return getBootstrapData_(
+    return getFastBootstrapData_(
       requiredText_(payload.school, 'school', 128),
       optionalText_(payload.lab),
     );
   }
 
+  if (payload.action === 'bookingOptions') {
+    return getBookingOptionsData_(requiredText_(payload.school, 'school', 128));
+  }
+
   if (payload.action === 'availability') {
-    return getAvailability_(requiredText_(payload.school, 'school', 128), {
+    return getFastAvailability_(requiredText_(payload.school, 'school', 128), {
       laboratoryId: requiredText_(payload.laboratoryId, 'laboratoryId', 128),
       date: requiredText_(payload.date, 'date', 32),
     });
   }
 
   if (payload.action === 'weekAvailability') {
-    return getWeekAvailability_(requiredText_(payload.school, 'school', 128), {
+    return getFastWeekAvailability_(requiredText_(payload.school, 'school', 128), {
       laboratoryId: requiredText_(payload.laboratoryId, 'laboratoryId', 128),
       dates: Array.isArray(payload.dates)
         ? payload.dates
         : splitList_(requiredText_(payload.dates, 'dates', 512)),
-    });
-  }
-
-  if (payload.action === 'diagnostics') {
-    return runDiagnostics_(requiredText_(payload.school, 'school', 128), {
-      mode: optionalText_(payload.mode),
-      preselectedLaboratoryId: optionalText_(payload.lab),
-      laboratoryId: optionalText_(payload.laboratoryId),
-      dates: Array.isArray(payload.dates)
-        ? payload.dates
-        : splitList_(optionalText_(payload.dates)),
     });
   }
 
