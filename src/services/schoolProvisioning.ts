@@ -1,4 +1,8 @@
 import { ensureSpreadsheetWriterAccess } from '../integrations/google/googleDrive';
+import {
+  callAppsScriptViaForm,
+  type AppsScriptEnvelope,
+} from './appsScriptFormTransport';
 import { verifySpreadsheetBinding } from './spreadsheetBinding';
 
 interface ApiSuccess<T> {
@@ -107,14 +111,13 @@ function configuredBackendAccountEmail(providedEmail?: string): string {
   return email;
 }
 
-async function readEnvelope<T>(response: Response): Promise<T> {
-  const payload: unknown = await response.json().catch(() => null);
+function readPayload<T>(payload: unknown, responseOk = true): T {
   if (!payload || typeof payload !== 'object' || !('ok' in payload)) {
     throw new SchoolProvisioningError('O serviço público retornou uma resposta inválida.');
   }
 
   const envelope = payload as ApiEnvelope<T>;
-  if (!response.ok || !envelope.ok) {
+  if (!responseOk || !envelope.ok) {
     const providedMessage = envelope.ok ? undefined : envelope.error?.message;
     throw new SchoolProvisioningError(
       typeof providedMessage === 'string' && providedMessage.trim()
@@ -126,30 +129,59 @@ async function readEnvelope<T>(response: Response): Promise<T> {
   return envelope.data;
 }
 
+async function readEnvelope<T>(response: Response): Promise<T> {
+  const payload: unknown = await response.json().catch(() => null);
+  return readPayload<T>(payload, response.ok);
+}
+
+function transportErrorMessage(error: unknown): string {
+  if (error instanceof SchoolProvisioningError) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return 'Não foi possível acessar o serviço público da agenda.';
+}
+
 async function getServiceInfo(
   endpoint: string,
-  fetchImplementation: typeof window.fetch,
+  fetchImplementation?: typeof window.fetch,
 ): Promise<ServiceInfo> {
-  const url = new URL(endpoint);
-  url.searchParams.set('action', 'serviceInfo');
-  url.searchParams.set('_', String(Date.now()));
+  try {
+    let result: ServiceInfo;
+    if (fetchImplementation) {
+      const url = new URL(endpoint);
+      url.searchParams.set('action', 'serviceInfo');
+      url.searchParams.set('_', String(Date.now()));
 
-  const response = await fetchImplementation(url, {
-    method: 'GET',
-    cache: 'no-store',
-    redirect: 'follow',
-  });
-  const result = await readEnvelope<ServiceInfo>(response);
-  const backendAccountEmail = result.backendAccountEmail?.trim().toLocaleLowerCase();
-  if (!backendAccountEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(backendAccountEmail)) {
-    throw new SchoolProvisioningError(
-      'O serviço público não informou uma conta válida para vincular a planilha.',
-    );
+      const response = await fetchImplementation(url, {
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'follow',
+      });
+      result = await readEnvelope<ServiceInfo>(response);
+    } else {
+      const envelope: AppsScriptEnvelope<ServiceInfo> = await callAppsScriptViaForm<ServiceInfo>(
+        endpoint,
+        { action: 'serviceInfo' },
+      );
+      result = readPayload<ServiceInfo>(envelope);
+    }
+
+    const backendAccountEmail = result.backendAccountEmail?.trim().toLocaleLowerCase();
+    if (!backendAccountEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(backendAccountEmail)) {
+      throw new SchoolProvisioningError(
+        'O serviço público não informou uma conta válida para vincular a planilha.',
+      );
+    }
+    return {
+      backendAccountEmail,
+      googleChatConfigured: result.googleChatConfigured === true,
+    };
+  } catch (error: unknown) {
+    throw new SchoolProvisioningError(transportErrorMessage(error));
   }
-  return {
-    backendAccountEmail,
-    googleChatConfigured: result.googleChatConfigured === true,
-  };
 }
 
 /**
@@ -163,8 +195,7 @@ export async function ensureGoogleChatBackendReady(
   const expectedBackendAccountEmail = configuredBackendAccountEmail(
     options.expectedBackendAccountEmail,
   );
-  const fetchImplementation = resolveFetch(options.fetchImplementation);
-  const serviceInfo = await getServiceInfo(endpoint, fetchImplementation);
+  const serviceInfo = await getServiceInfo(endpoint, options.fetchImplementation);
 
   if (serviceInfo.backendAccountEmail !== expectedBackendAccountEmail) {
     throw new SchoolProvisioningError(
@@ -181,15 +212,28 @@ export async function ensureGoogleChatBackendReady(
 async function registerSchool(
   endpoint: string,
   request: Omit<ProvisionSchoolWorkspaceRequest, 'accessToken'>,
-  fetchImplementation: typeof window.fetch,
+  fetchImplementation?: typeof window.fetch,
 ): Promise<RegistrationResult> {
-  const response = await fetchImplementation(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-    body: JSON.stringify({ action: 'registerSchool', request }),
-    redirect: 'follow',
-  });
-  return readEnvelope<RegistrationResult>(response);
+  try {
+    if (fetchImplementation) {
+      const response = await fetchImplementation(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify({ action: 'registerSchool', request }),
+        redirect: 'follow',
+      });
+      return await readEnvelope<RegistrationResult>(response);
+    }
+
+    const envelope: AppsScriptEnvelope<RegistrationResult> =
+      await callAppsScriptViaForm<RegistrationResult>(endpoint, {
+        action: 'registerSchool',
+        request,
+      });
+    return readPayload<RegistrationResult>(envelope);
+  } catch (error: unknown) {
+    throw new SchoolProvisioningError(transportErrorMessage(error));
+  }
 }
 
 export async function provisionSchoolWorkspace(
@@ -209,8 +253,8 @@ export async function provisionSchoolWorkspace(
   const expectedBackendAccountEmail = configuredBackendAccountEmail(
     options.expectedBackendAccountEmail,
   );
-  const fetchImplementation = resolveFetch(options.fetchImplementation);
-  const { backendAccountEmail } = await getServiceInfo(endpoint, fetchImplementation);
+  const driveFetchImplementation = resolveFetch(options.fetchImplementation);
+  const { backendAccountEmail } = await getServiceInfo(endpoint, options.fetchImplementation);
   if (backendAccountEmail !== expectedBackendAccountEmail) {
     throw new SchoolProvisioningError(
       'O serviço público não corresponde à conta central configurada para esta implantação.',
@@ -219,13 +263,13 @@ export async function provisionSchoolWorkspace(
 
   await ensureSpreadsheetWriterAccess(spreadsheetId, backendAccountEmail, {
     accessToken: request.accessToken,
-    fetchImplementation,
+    fetchImplementation: driveFetchImplementation,
   });
 
   const registration = await registerSchool(
     endpoint,
     { spreadsheetId, schoolId, revision },
-    fetchImplementation,
+    options.fetchImplementation,
   );
   const bindingMatches = await verifySpreadsheetBinding(
     spreadsheetId,
