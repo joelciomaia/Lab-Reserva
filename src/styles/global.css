@@ -123,6 +123,48 @@ a:hover {
   transform: translateY(0);
 }
 
+/* Os cards da agenda precisam funcionar como linhas compactas, não como cartões altos. */
+[data-period-count] button[data-span] {
+  gap: 0.0625rem;
+  padding: 0.2rem 0.35rem;
+  line-height: 1.05;
+}
+
+[data-period-count] button[data-span] strong,
+[data-period-count] button[data-span] span,
+[data-period-count] button[data-span] small {
+  width: 100%;
+  line-height: 1.05;
+}
+
+[data-period-count] button[data-span='1'] span:nth-of-type(n + 2),
+[data-period-count] button[data-span='1'] small {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  [data-period-count] button[data-span] {
+    gap: 0.0625rem;
+    padding: 0.22rem 0.4rem;
+  }
+
+  [data-period-count] button[data-span] strong {
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  [data-period-count] button[data-span] span {
+    font-size: 0.65rem;
+  }
+
+  [data-period-count] button[data-span='1'] strong,
+  [data-period-count] button[data-span='1'] span:first-of-type {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
