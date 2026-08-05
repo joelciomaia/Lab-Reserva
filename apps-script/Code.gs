@@ -28,6 +28,13 @@ function doGet(event) {
       });
     }
 
+    if (action === 'weekAvailability') {
+      return getWeekAvailability_(requiredQueryParameter_(parameters, 'school'), {
+        laboratoryId: requiredQueryParameter_(parameters, 'laboratoryId'),
+        dates: splitList_(requiredQueryParameter_(parameters, 'dates')),
+      });
+    }
+
     throwApiError_('UNKNOWN_ACTION', 'A ação GET informada não existe.');
   });
 }
@@ -131,6 +138,15 @@ function dispatchBridgePayload_(payload) {
     return getAvailability_(requiredText_(payload.school, 'school', 128), {
       laboratoryId: requiredText_(payload.laboratoryId, 'laboratoryId', 128),
       date: requiredText_(payload.date, 'date', 32),
+    });
+  }
+
+  if (payload.action === 'weekAvailability') {
+    return getWeekAvailability_(requiredText_(payload.school, 'school', 128), {
+      laboratoryId: requiredText_(payload.laboratoryId, 'laboratoryId', 128),
+      dates: Array.isArray(payload.dates)
+        ? payload.dates
+        : splitList_(requiredText_(payload.dates, 'dates', 512)),
     });
   }
 
