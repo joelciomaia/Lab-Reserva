@@ -22,6 +22,9 @@ export type AvailabilityStatus = 'AVAILABLE' | 'UNAVAILABLE';
 
 export interface PeriodReservationSummary {
   id: string;
+  teacherName?: string;
+  subject?: string;
+  classGroup?: string;
 }
 
 export interface PeriodAvailability {
@@ -34,7 +37,13 @@ export interface PeriodAvailability {
   startTime: string;
   endTime: string;
   status: AvailabilityStatus;
+  /** Primeira reserva, mantida para compatibilidade com respostas antigas. */
   reservation?: PeriodReservationSummary;
+  /** Todas as reservas simultâneas que ocupam o período. */
+  reservations?: PeriodReservationSummary[];
+  reservationCount?: number;
+  maxConcurrentClasses?: number;
+  remainingCapacity?: number;
 }
 
 export interface AvailabilityRequest {
