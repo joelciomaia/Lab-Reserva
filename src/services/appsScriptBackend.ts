@@ -6,6 +6,8 @@ import type {
   BootstrapData,
   BootstrapParams,
   CreateReservationRequest,
+  PeriodAvailability,
+  PeriodReservationSummary,
   Reservation,
 } from '../types';
 import { BackendError } from '../types';
@@ -29,6 +31,26 @@ interface ApiFailure {
 }
 
 type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
+
+interface CachedAvailability {
+  response: AvailabilityResponse;
+  expiresAt: number;
+}
+
+interface AvailabilityWaiter {
+  resolve: (response: AvailabilityResponse) => void;
+  reject: (error: unknown) => void;
+}
+
+interface PendingAvailabilityBatch {
+  schoolId: string;
+  laboratoryId: string;
+  dates: Set<string>;
+  waitersByDate: Map<string, AvailabilityWaiter[]>;
+  timerId: number;
+}
+
+const AVAILABILITY_CACHE_TTL_MS = 30_000;
 
 const APP_ERROR_CODES = new Set<AppErrorCode>([
   'VALIDATION_ERROR',
@@ -118,6 +140,40 @@ function normalizeApiError(failure: ApiFailure): BackendError {
   return new BackendError(code, message, failure.error?.details);
 }
 
+function normalizeReservationSummary(
+  reservation: PeriodReservationSummary,
+): PeriodReservationSummary {
+  return {
+    id: reservation.id,
+    ...(reservation.teacherName ? { teacherName: reservation.teacherName } : {}),
+    ...(reservation.subject ? { subject: reservation.subject } : {}),
+    ...(reservation.classGroup ? { classGroup: reservation.classGroup } : {}),
+  };
+}
+
+function normalizePeriodAvailability(period: PeriodAvailability): PeriodAvailability {
+  const reservations = period.reservations?.length
+    ? period.reservations.map(normalizeReservationSummary)
+    : period.reservation
+      ? [normalizeReservationSummary(period.reservation)]
+      : [];
+  const firstReservation = reservations[0];
+
+  return {
+    ...period,
+    ...(firstReservation ? { reservation: firstReservation } : {}),
+    reservations,
+    reservationCount: period.reservationCount ?? reservations.length,
+  };
+}
+
+function normalizeAvailabilityResponse(response: AvailabilityResponse): AvailabilityResponse {
+  return {
+    ...response,
+    periods: response.periods.map(normalizePeriodAvailability),
+  };
+}
+
 export interface AppsScriptBackendOptions {
   fetchImplementation?: typeof window.fetch;
 }
@@ -125,6 +181,8 @@ export interface AppsScriptBackendOptions {
 export class AppsScriptBackend implements BackendClient {
   private readonly endpoint: string;
   private readonly fetchImplementation: typeof window.fetch | undefined;
+  private readonly availabilityCache = new Map<string, CachedAvailability>();
+  private readonly pendingAvailabilityBatches = new Map<string, PendingAvailabilityBatch>();
 
   constructor(endpoint: string, options: AppsScriptBackendOptions = {}) {
     this.endpoint = normalizeEndpoint(endpoint);
@@ -226,6 +284,106 @@ export class AppsScriptBackend implements BackendClient {
     }
   }
 
+  private availabilityKey(schoolId: string, laboratoryId: string, date: string): string {
+    return `${schoolId}\u0000${laboratoryId}\u0000${date}`;
+  }
+
+  private availabilityBatchKey(schoolId: string, laboratoryId: string): string {
+    return `${schoolId}\u0000${laboratoryId}`;
+  }
+
+  private readCachedAvailability(
+    schoolId: string,
+    laboratoryId: string,
+    date: string,
+  ): AvailabilityResponse | null {
+    const key = this.availabilityKey(schoolId, laboratoryId, date);
+    const cached = this.availabilityCache.get(key);
+    if (!cached) {
+      return null;
+    }
+    if (cached.expiresAt <= Date.now()) {
+      this.availabilityCache.delete(key);
+      return null;
+    }
+    return cached.response;
+  }
+
+  private cacheAvailability(schoolId: string, response: AvailabilityResponse): void {
+    this.availabilityCache.set(
+      this.availabilityKey(schoolId, response.laboratoryId, response.date),
+      {
+        response,
+        expiresAt: Date.now() + AVAILABILITY_CACHE_TTL_MS,
+      },
+    );
+  }
+
+  private clearAvailabilityCache(schoolId: string, laboratoryId: string, date: string): void {
+    this.availabilityCache.delete(this.availabilityKey(schoolId, laboratoryId, date));
+  }
+
+  private async fetchAvailabilityBatch(
+    schoolId: string,
+    laboratoryId: string,
+    dates: string[],
+  ): Promise<AvailabilityResponse[]> {
+    if (dates.length === 1) {
+      const response = await this.get<AvailabilityResponse>({
+        action: 'availability',
+        school: schoolId,
+        laboratoryId,
+        date: dates[0],
+      });
+      return [normalizeAvailabilityResponse(response)];
+    }
+
+    const responses = await this.get<AvailabilityResponse[]>({
+      action: 'weekAvailability',
+      school: schoolId,
+      laboratoryId,
+      dates: dates.join(','),
+    });
+    return responses.map(normalizeAvailabilityResponse);
+  }
+
+  private async flushAvailabilityBatch(batchKey: string): Promise<void> {
+    const batch = this.pendingAvailabilityBatches.get(batchKey);
+    if (!batch) {
+      return;
+    }
+    this.pendingAvailabilityBatches.delete(batchKey);
+
+    const dates = [...batch.dates].sort();
+    try {
+      const responses = await this.fetchAvailabilityBatch(
+        batch.schoolId,
+        batch.laboratoryId,
+        dates,
+      );
+      const responseByDate = new Map(responses.map((response) => [response.date, response]));
+
+      dates.forEach((date) => {
+        const response = responseByDate.get(date);
+        const waiters = batch.waitersByDate.get(date) ?? [];
+        if (!response) {
+          const error = new BackendError(
+            'BACKEND_UNAVAILABLE',
+            'A agenda não retornou todos os dias solicitados.',
+          );
+          waiters.forEach(({ reject }) => reject(error));
+          return;
+        }
+        this.cacheAvailability(batch.schoolId, response);
+        waiters.forEach(({ resolve }) => resolve(response));
+      });
+    } catch (error: unknown) {
+      batch.waitersByDate.forEach((waiters) => {
+        waiters.forEach(({ reject }) => reject(error));
+      });
+    }
+  }
+
   getBootstrapData(params: BootstrapParams = {}): Promise<BootstrapData> {
     return this.get<BootstrapData>({
       action: 'bootstrap',
@@ -234,30 +392,53 @@ export class AppsScriptBackend implements BackendClient {
     });
   }
 
-  async getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse> {
-    const response = await this.get<AvailabilityResponse>({
-      action: 'availability',
-      school: requirePublicSchoolId(request.schoolId),
-      laboratoryId: request.laboratoryId,
-      date: request.date,
-    });
+  getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse> {
+    const schoolId = requirePublicSchoolId(request.schoolId);
+    const cached = this.readCachedAvailability(schoolId, request.laboratoryId, request.date);
+    if (cached) {
+      return Promise.resolve(cached);
+    }
 
-    return {
-      ...response,
-      periods: response.periods.map(({ reservation, ...period }) => ({
-        ...period,
-        ...(reservation ? { reservation: { id: reservation.id } } : {}),
-      })),
-    };
+    return new Promise<AvailabilityResponse>((resolve, reject) => {
+      const batchKey = this.availabilityBatchKey(schoolId, request.laboratoryId);
+      const existingBatch = this.pendingAvailabilityBatches.get(batchKey);
+      const batch =
+        existingBatch ??
+        {
+          schoolId,
+          laboratoryId: request.laboratoryId,
+          dates: new Set<string>(),
+          waitersByDate: new Map<string, AvailabilityWaiter[]>(),
+          timerId: window.setTimeout(() => {
+            void this.flushAvailabilityBatch(batchKey);
+          }, 0),
+        };
+
+      batch.dates.add(request.date);
+      const waiters = batch.waitersByDate.get(request.date) ?? [];
+      waiters.push({ resolve, reject });
+      batch.waitersByDate.set(request.date, waiters);
+
+      if (!existingBatch) {
+        this.pendingAvailabilityBatches.set(batchKey, batch);
+      }
+    });
   }
 
-  createReservation(request: CreateReservationRequest): Promise<Reservation> {
+  async createReservation(request: CreateReservationRequest): Promise<Reservation> {
     const { schoolId, ...reservationRequest } = request;
-    return this.post<Reservation>({
+    const normalizedSchoolId = requirePublicSchoolId(schoolId);
+    const reservation = await this.post<Reservation>({
       action: 'createReservation',
-      school: requirePublicSchoolId(schoolId),
+      school: normalizedSchoolId,
       request: reservationRequest,
     });
+    this.clearAvailabilityCache(
+      normalizedSchoolId,
+      reservationRequest.laboratoryId,
+      reservationRequest.date,
+    );
+    return reservation;
   }
 }
 
