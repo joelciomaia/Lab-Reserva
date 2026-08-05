@@ -44,6 +44,14 @@ jobs:
           if text.count(old) != 1:
               raise RuntimeError('Cabeçalho de reservas não encontrado para normalização.')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          bootstrap_path = Path('src/app/BootstrapContext.tsx')
+          bootstrap = bootstrap_path.read_text(encoding='utf-8')
+          lint_old = 'currentData && currentData.school.id === bootstrapData.school.id'
+          lint_new = 'currentData?.school.id === bootstrapData.school.id'
+          if bootstrap.count(lint_old) != 1:
+              raise RuntimeError('Trecho de atualização do bootstrap não encontrado.')
+          bootstrap_path.write_text(bootstrap.replace(lint_old, lint_new, 1), encoding='utf-8')
           PY
 
       - run: npm ci
