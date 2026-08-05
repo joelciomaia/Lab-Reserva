@@ -1,8 +1,8 @@
 .viewport {
   width: 100%;
-  max-height: calc(100dvh - 13rem);
+  max-height: none;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: visible;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -201,7 +201,7 @@
 }
 
 .freeSlot:focus-visible {
-  z-index: 3;
+  z-index: 6;
   background: var(--color-brand-50);
   outline: 3px solid var(--color-focus);
   outline-offset: -3px;
@@ -224,17 +224,47 @@
   opacity: 1;
 }
 
+.partialSlot {
+  z-index: 6;
+  align-self: end;
+  justify-self: end;
+  width: 1.625rem;
+  height: 1.625rem;
+  min-height: 0;
+  padding: 0;
+  margin: 0.125rem;
+  overflow: visible;
+  background: rgb(255 255 255 / 0.94);
+  border: 1px solid var(--color-brand-200);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgb(23 32 42 / 0.18);
+}
+
+.partialSlot:hover {
+  background: var(--color-brand-50);
+}
+
+.partialSlot span {
+  display: none !important;
+}
+
+.partialSlot .slotPlus {
+  opacity: 1;
+}
+
 .event {
   position: relative;
   z-index: 3;
   display: flex;
   min-width: 0;
   align-self: stretch;
+  justify-self: start;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.0625rem;
   padding: 0.25rem 0.2rem;
-  margin: 0.0625rem;
+  margin-block: 0.0625rem;
+  margin-inline: 0.0625rem;
   overflow: hidden;
   color: var(--event-text);
   background: var(--event-background);
@@ -252,6 +282,7 @@
 }
 
 .event:focus-visible {
+  z-index: 7;
   outline: 3px solid var(--color-focus);
   outline-offset: -2px;
 }
@@ -407,7 +438,7 @@
 
 @media (min-width: 48rem) {
   .viewport {
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
   }
 
   .grid {
@@ -465,10 +496,21 @@
     opacity: 0;
   }
 
+  .partialSlot {
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+  }
+
+  .partialSlot .slotPlus {
+    opacity: 1;
+  }
+
   .event {
     gap: 0.125rem;
     padding: 0.4rem 0.45rem;
-    margin: 0.125rem 0.25rem;
+    margin-block: 0.125rem;
+    margin-inline-end: 0.0625rem;
     border-inline-start-width: 0.25rem;
     border-radius: 0.375rem;
   }
