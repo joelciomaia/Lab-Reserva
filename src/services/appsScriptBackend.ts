@@ -9,6 +9,10 @@ import type {
   Reservation,
 } from '../types';
 import { BackendError } from '../types';
+import {
+  callAppsScriptViaForm,
+  type AppsScriptEnvelope,
+} from './appsScriptFormTransport';
 
 interface ApiSuccess<T> {
   ok: true;
@@ -120,11 +124,27 @@ export interface AppsScriptBackendOptions {
 
 export class AppsScriptBackend implements BackendClient {
   private readonly endpoint: string;
-  private readonly fetchImplementation: typeof window.fetch;
+  private readonly fetchImplementation?: typeof window.fetch;
 
   constructor(endpoint: string, options: AppsScriptBackendOptions = {}) {
     this.endpoint = normalizeEndpoint(endpoint);
-    this.fetchImplementation = options.fetchImplementation ?? window.fetch.bind(window);
+    this.fetchImplementation = options.fetchImplementation;
+  }
+
+  private readPayload<T>(payload: unknown, responseOk = true): T {
+    if (!isRecord(payload) || typeof payload.ok !== 'boolean') {
+      throw new BackendError(
+        'BACKEND_UNAVAILABLE',
+        'A integração com o Google Sheets retornou uma resposta inválida.',
+      );
+    }
+
+    const envelope = payload as unknown as ApiEnvelope<T>;
+    if (!responseOk || !envelope.ok) {
+      throw normalizeApiError(envelope.ok ? { ok: false } : envelope);
+    }
+
+    return envelope.data;
   }
 
   private async readEnvelope<T>(response: Response): Promise<T> {
@@ -138,31 +158,28 @@ export class AppsScriptBackend implements BackendClient {
       );
     }
 
-    if (!isRecord(payload) || typeof payload.ok !== 'boolean') {
-      throw new BackendError(
-        'BACKEND_UNAVAILABLE',
-        'A integração com o Google Sheets retornou uma resposta inválida.',
-      );
-    }
+    return this.readPayload<T>(payload, response.ok);
+  }
 
-    const envelope = payload as unknown as ApiEnvelope<T>;
-    if (!response.ok || !envelope.ok) {
-      throw normalizeApiError(envelope.ok ? { ok: false } : envelope);
-    }
-
-    return envelope.data;
+  private async callThroughForm<T>(payload: Record<string, unknown>): Promise<T> {
+    const envelope: AppsScriptEnvelope<T> = await callAppsScriptViaForm<T>(this.endpoint, payload);
+    return this.readPayload<T>(envelope);
   }
 
   private async get<T>(parameters: Record<string, string | undefined>): Promise<T> {
-    const url = new URL(this.endpoint);
-    Object.entries(parameters).forEach(([key, value]) => {
-      if (value) {
-        url.searchParams.set(key, value);
-      }
-    });
-    url.searchParams.set('_', String(Date.now()));
-
     try {
+      if (!this.fetchImplementation) {
+        return await this.callThroughForm<T>(parameters);
+      }
+
+      const url = new URL(this.endpoint);
+      Object.entries(parameters).forEach(([key, value]) => {
+        if (value) {
+          url.searchParams.set(key, value);
+        }
+      });
+      url.searchParams.set('_', String(Date.now()));
+
       const response = await this.fetchImplementation(url, {
         method: 'GET',
         cache: 'no-store',
@@ -175,16 +192,22 @@ export class AppsScriptBackend implements BackendClient {
       }
       throw new BackendError(
         'BACKEND_UNAVAILABLE',
-        'Não foi possível acessar a agenda no Google Sheets.',
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : 'Não foi possível acessar a agenda no Google Sheets.',
       );
     }
   }
 
-  private async post<T>(body: unknown): Promise<T> {
+  private async post<T>(body: Record<string, unknown>): Promise<T> {
     try {
+      if (!this.fetchImplementation) {
+        return await this.callThroughForm<T>(body);
+      }
+
       const response = await this.fetchImplementation(this.endpoint, {
         method: 'POST',
-        // text/plain evita preflight CORS no Web App do Apps Script.
+        // text/plain evita preflight CORS no Web App do Apps Script durante os testes e proxies.
         headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
         body: JSON.stringify(body),
         redirect: 'follow',
@@ -196,7 +219,9 @@ export class AppsScriptBackend implements BackendClient {
       }
       throw new BackendError(
         'BACKEND_UNAVAILABLE',
-        'Não foi possível salvar o agendamento no Google Sheets.',
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : 'Não foi possível salvar o agendamento no Google Sheets.',
       );
     }
   }
