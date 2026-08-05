@@ -32,6 +32,11 @@ interface ApiFailure {
 
 type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
+interface AgendaSnapshotResponse {
+  bootstrap: BootstrapData;
+  availability: AvailabilityResponse[];
+}
+
 interface AvailabilityWaiter {
   resolve: (response: AvailabilityResponse) => void;
   reject: (error: unknown) => void;
@@ -175,6 +180,7 @@ export class AppsScriptBackend implements BackendClient {
   private readonly endpoint: string;
   private readonly fetchImplementation: typeof window.fetch | undefined;
   private readonly pendingAvailabilityBatches = new Map<string, PendingAvailabilityBatch>();
+  private readonly initialAvailability = new Map<string, AvailabilityResponse>();
 
   constructor(endpoint: string, options: AppsScriptBackendOptions = {}) {
     this.endpoint = normalizeEndpoint(endpoint);
@@ -276,6 +282,10 @@ export class AppsScriptBackend implements BackendClient {
     }
   }
 
+  private availabilityKey(schoolId: string, laboratoryId: string, date: string): string {
+    return `${schoolId}\u0000${laboratoryId}\u0000${date}`;
+  }
+
   private availabilityBatchKey(schoolId: string, laboratoryId: string): string {
     return `${schoolId}\u0000${laboratoryId}`;
   }
@@ -340,16 +350,41 @@ export class AppsScriptBackend implements BackendClient {
     }
   }
 
-  getBootstrapData(params: BootstrapParams = {}): Promise<BootstrapData> {
-    return this.get<BootstrapData>({
-      action: 'bootstrap',
-      school: requirePublicSchoolId(params.schoolId),
-      lab: params.preselectedLaboratoryId,
+  async getBootstrapData(params: BootstrapParams = {}): Promise<BootstrapData> {
+    const schoolId = requirePublicSchoolId(params.schoolId);
+    const initial = params.initialAvailability;
+
+    if (!initial || initial.dates.length === 0) {
+      return this.get<BootstrapData>({
+        action: 'bootstrap',
+        school: schoolId,
+        lab: params.preselectedLaboratoryId,
+      });
+    }
+
+    const snapshot = await this.get<AgendaSnapshotResponse>({
+      action: 'agendaSnapshot',
+      school: schoolId,
+      laboratoryId: initial.laboratoryId,
+      dates: initial.dates.join(','),
     });
+    snapshot.availability.map(normalizeAvailabilityResponse).forEach((response) => {
+      this.initialAvailability.set(
+        this.availabilityKey(schoolId, response.laboratoryId, response.date),
+        response,
+      );
+    });
+    return snapshot.bootstrap;
   }
 
   getAvailability(request: AvailabilityRequest): Promise<AvailabilityResponse> {
     const schoolId = requirePublicSchoolId(request.schoolId);
+    const initialKey = this.availabilityKey(schoolId, request.laboratoryId, request.date);
+    const initialResponse = this.initialAvailability.get(initialKey);
+    if (initialResponse) {
+      this.initialAvailability.delete(initialKey);
+      return Promise.resolve(initialResponse);
+    }
 
     return new Promise<AvailabilityResponse>((resolve, reject) => {
       const batchKey = this.availabilityBatchKey(schoolId, request.laboratoryId);

@@ -33,6 +33,29 @@ function readPublicCoreConfiguration_(spreadsheet) {
   };
 }
 
+function readAvailabilityConfiguration_(spreadsheet) {
+  var laboratoriesTable = readTable_(spreadsheet, 'LABORATORIOS', ['ID', 'NOME', 'ATIVO']);
+  var shiftsTable = readTable_(spreadsheet, 'TURNOS', [
+    'ID',
+    'NOME',
+    'HORA_INICIO',
+    'DURACAO_AULA',
+    'QUANTIDADE_AULAS',
+    'INTERVALO_APOS',
+    'DURACAO_INTERVALO',
+    'DIAS_SEMANA',
+    'ATIVO',
+  ]);
+  var laboratories = readLaboratories_(laboratoriesTable);
+  var shifts = readShifts_(shiftsTable);
+
+  return {
+    laboratories: laboratories,
+    shifts: shifts,
+    periods: createPeriods_(shifts),
+  };
+}
+
 function readPublicBookingOptions_(spreadsheet) {
   var settingsTable = readTable_(spreadsheet, 'CONFIGURACOES', ['CHAVE', 'VALOR']);
   var subjectsTable = readTable_(spreadsheet, 'DISCIPLINAS', ['ID', 'NOME', 'ATIVO']);
@@ -80,9 +103,18 @@ function activePublicLaboratories_(configuration) {
     });
 }
 
-function getFastBootstrapData_(school, preselectedLaboratoryId) {
-  var spreadsheet = spreadsheetForSchool_(school);
-  var configuration = readPublicCoreConfiguration_(spreadsheet);
+function assertPublicConfigurationSchool_(configuration, school) {
+  var normalizedSchool = schoolId_(school, 'school', 'VALIDATION_ERROR');
+  if (configuration.school.id !== normalizedSchool) {
+    throwApiError_(
+      'SPREADSHEET_UNAVAILABLE',
+      'A configuração publicada não corresponde a esta escola.',
+    );
+  }
+  return normalizedSchool;
+}
+
+function buildFastBootstrapData_(spreadsheet, configuration, preselectedLaboratoryId) {
   var data = {
     school: configuration.school,
     laboratories: activePublicLaboratories_(configuration),
@@ -101,14 +133,19 @@ function getFastBootstrapData_(school, preselectedLaboratoryId) {
   return data;
 }
 
+function getFastBootstrapData_(school, preselectedLaboratoryId) {
+  var spreadsheet = spreadsheetForSchoolPublicRead_(school);
+  var configuration = readPublicCoreConfiguration_(spreadsheet);
+  assertPublicConfigurationSchool_(configuration, school);
+  return buildFastBootstrapData_(spreadsheet, configuration, preselectedLaboratoryId);
+}
+
 function getBookingOptionsData_(school) {
-  var spreadsheet = spreadsheetForSchool_(school);
+  var spreadsheet = spreadsheetForSchoolPublicRead_(school);
   return readPublicBookingOptions_(spreadsheet);
 }
 
-function fastAvailabilityContext_(school, laboratoryId) {
-  var spreadsheet = spreadsheetForSchool_(school);
-  var configuration = readPublicCoreConfiguration_(spreadsheet);
+function fastAvailabilityContextFromSpreadsheet_(spreadsheet, laboratoryId, configuration) {
   var laboratory = activeLaboratory_(configuration, laboratoryId);
   if (!laboratory) {
     throwApiError_('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');
@@ -120,6 +157,12 @@ function fastAvailabilityContext_(school, laboratoryId) {
     reservations: readReservations_(spreadsheet),
     cancelled: cancellationSet_(readCancellations_(spreadsheet)),
   };
+}
+
+function fastAvailabilityContext_(school, laboratoryId) {
+  var spreadsheet = spreadsheetForSchoolPublicRead_(school);
+  var configuration = readAvailabilityConfiguration_(spreadsheet);
+  return fastAvailabilityContextFromSpreadsheet_(spreadsheet, laboratoryId, configuration);
 }
 
 function getFastAvailability_(school, request) {
@@ -137,4 +180,24 @@ function getFastWeekAvailability_(school, request) {
   return dates.map(function (date) {
     return buildAvailabilityResponse_(context, laboratoryId, date);
   });
+}
+
+function getAgendaSnapshot_(school, request) {
+  var laboratoryId = requiredText_(request.laboratoryId, 'laboratoryId', 128);
+  var dates = validateAvailabilityDates_(request.dates);
+  var spreadsheet = spreadsheetForSchoolPublicRead_(school);
+  var configuration = readPublicCoreConfiguration_(spreadsheet);
+  assertPublicConfigurationSchool_(configuration, school);
+  var context = fastAvailabilityContextFromSpreadsheet_(
+    spreadsheet,
+    laboratoryId,
+    configuration,
+  );
+
+  return {
+    bootstrap: buildFastBootstrapData_(spreadsheet, configuration, laboratoryId),
+    availability: dates.map(function (date) {
+      return buildAvailabilityResponse_(context, laboratoryId, date);
+    }),
+  };
 }

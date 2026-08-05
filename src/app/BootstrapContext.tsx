@@ -6,6 +6,8 @@ import { backendClient } from '../services/backend';
 import { loadBookingOptions } from '../services/bookingOptionsLoader';
 import type { AppError, BackendClient, BootstrapData, BootstrapParams } from '../types';
 import { getFriendlyError } from '../types';
+import { isValidIsoDate } from '../utils/dates';
+import { getCurrentAgendaReferenceDate, getSchoolWeek } from '../utils/week';
 import { getPublicAgendaContext, hasPublicAgendaContext } from './publicAgendaContext';
 
 interface BootstrapContextValue {
@@ -45,6 +47,20 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
   const shouldLoadPublicData =
     location.pathname === '/agendar' ||
     (location.pathname === '/' && hasPublicAgendaContext(location.search, window.location.search));
+  const initialAvailability = useMemo(() => {
+    if (isBookingRoute || !preselectedLaboratoryId) {
+      return undefined;
+    }
+
+    const queryDate = new URLSearchParams(location.search).get('date');
+    const referenceDate = isValidIsoDate(queryDate)
+      ? new Date(`${queryDate}T12:00:00`)
+      : getCurrentAgendaReferenceDate(new Date());
+    return {
+      laboratoryId: preselectedLaboratoryId,
+      dates: getSchoolWeek(referenceDate).map((day) => day.isoDate),
+    };
+  }, [isBookingRoute, location.search, preselectedLaboratoryId]);
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<AppError | null>(null);
   const [bookingOptionsError, setBookingOptionsError] = useState<AppError | null>(null);
@@ -64,10 +80,11 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
     }
 
     let isCurrentRequest = true;
-    const params: BootstrapParams = {
-      ...(publicSchoolId ? { schoolId: publicSchoolId } : {}),
-      ...(preselectedLaboratoryId ? { preselectedLaboratoryId } : {}),
-    };
+        const params: BootstrapParams = {
+    ...(publicSchoolId ? { schoolId: publicSchoolId } : {}),
+    ...(preselectedLaboratoryId ? { preselectedLaboratoryId } : {}),
+    ...(initialAvailability ? { initialAvailability } : {}),
+  };
 
     // A agenda principal recebe primeiro apenas escola, laboratórios e horários.
     // Disciplinas, turmas e recursos são lidos em segundo plano, sem bloquear a tela.
@@ -123,6 +140,7 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
     };
   }, [
     client,
+    initialAvailability,
     isManagerRoute,
     preselectedLaboratoryId,
     publicSchoolId,

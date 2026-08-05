@@ -49,6 +49,15 @@ function readReservations_(spreadsheet) {
 }
 
 function readCancellations_(spreadsheet) {
+  var cancellationSheet = spreadsheet.getSheetByName(CANCELLATIONS_SHEET_NAME_);
+  if (!cancellationSheet) {
+    throwApiError_('CONFIGURATION_ERROR', 'A aba ' + CANCELLATIONS_SHEET_NAME_ + ' não existe na planilha.', {
+      sheet: CANCELLATIONS_SHEET_NAME_,
+    });
+  }
+  if (cancellationSheet.getLastRow() <= 1) {
+    return [];
+  }
   var table = readTable_(spreadsheet, CANCELLATIONS_SHEET_NAME_, CANCELLATIONS_HEADER_);
   var cancellations = [];
   var seenIds = Object.create(null);
@@ -277,9 +286,10 @@ function validateCreateRequest_(request) {
 function createReservation_(school, rawRequest) {
   var request = validateCreateRequest_(rawRequest);
   var created = withScriptLock_(function () {
-    var spreadsheet = spreadsheetForSchool_(school);
-    ensureOperationalSheetsUnlocked_(spreadsheet);
-    var configuration = readConfiguration_(spreadsheet);
+        var spreadsheet = spreadsheetForSchoolPublicRead_(school);
+  ensureOperationalSheetsUnlocked_(spreadsheet);
+  var configuration = readPublicCoreConfiguration_(spreadsheet);
+  assertPublicConfigurationSchool_(configuration, school);
     var laboratory = activeLaboratory_(configuration, request.laboratoryId);
     if (!laboratory) {
       throwApiError_('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');

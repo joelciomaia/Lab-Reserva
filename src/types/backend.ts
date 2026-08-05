@@ -11,10 +11,17 @@ import type {
   SaveAdminConfigurationRequest,
 } from './configuration';
 
+export interface InitialAvailabilityRequest {
+  laboratoryId: string;
+  dates: string[];
+}
+
 export interface BootstrapParams {
   /** Identificador público e imutável da escola usada como workspace. */
   schoolId?: string;
   preselectedLaboratoryId?: string;
+  /** Dados da semana devolvidos junto com a abertura, consumidos uma única vez. */
+  initialAvailability?: InitialAvailabilityRequest;
 }
 
 export interface BootstrapData {

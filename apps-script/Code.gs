@@ -39,6 +39,13 @@ function doGet(event) {
       });
     }
 
+    if (action === 'agendaSnapshot') {
+  return getAgendaSnapshot_(requiredQueryParameter_(parameters, 'school'), {
+    laboratoryId: requiredQueryParameter_(parameters, 'laboratoryId'),
+    dates: splitList_(requiredQueryParameter_(parameters, 'dates')),
+  });
+}
+
     if (action === 'diagnostics') {
       return runDiagnostics_(requiredQueryParameter_(parameters, 'school'), {
         mode: optionalText_(parameters.mode),
@@ -148,6 +155,15 @@ function dispatchReadPayload_(payload) {
         : splitList_(requiredText_(payload.dates, 'dates', 512)),
     });
   }
+
+  if (payload.action === 'agendaSnapshot') {
+  return getAgendaSnapshot_(requiredText_(payload.school, 'school', 128), {
+    laboratoryId: requiredText_(payload.laboratoryId, 'laboratoryId', 128),
+    dates: Array.isArray(payload.dates)
+      ? payload.dates
+      : splitList_(requiredText_(payload.dates, 'dates', 512)),
+  });
+}
 
   if (payload.action === 'diagnostics') {
     return runDiagnostics_(requiredText_(payload.school, 'school', 128), {

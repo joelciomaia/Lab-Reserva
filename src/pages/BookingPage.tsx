@@ -186,6 +186,7 @@ export function BookingPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const appliedQueryDateRef = useRef<string | null>(null);
   const appliedQueryPeriodRef = useRef<string | null>(null);
   const periodAvailabilityDescriptionBaseId = useId();
   const [availabilityRequest, setAvailabilityRequest] = useState<AvailabilityRequestState>({
@@ -330,6 +331,16 @@ export function BookingPage() {
   useEffect(() => {
     headingRef.current?.focus();
   }, [laboratory]);
+
+  useEffect(() => {
+    if (!isValidIsoDate(queryDate) || appliedQueryDateRef.current === queryDate) {
+      return;
+    }
+
+    appliedQueryDateRef.current = queryDate;
+    setValue('date', queryDate, { shouldDirty: false, shouldValidate: true });
+    setValue('periodIds', [], { shouldDirty: false, shouldValidate: false });
+  }, [queryDate, setValue]);
 
   useEffect(() => {
     if (!data || !laboratory || !availabilityKey) {
@@ -498,13 +509,13 @@ export function BookingPage() {
         notes: showObservations ? values.notes : '',
       });
 
-      navigate(
-        `/?school=${encodeURIComponent(data.school.id)}&lab=${encodeURIComponent(laboratory.id)}`,
-        {
-          replace: true,
-          state: { reservationId: reservation.id, reservationDate: reservation.date },
-        },
-      );
+            navigate(
+      `/?school=${encodeURIComponent(data.school.id)}&lab=${encodeURIComponent(laboratory.id)}&date=${encodeURIComponent(reservation.date)}`,
+      {
+        replace: true,
+        state: { reservationId: reservation.id, reservationDate: reservation.date },
+      },
+    );
     } catch (error: unknown) {
       const friendlyError = getFriendlyError(error);
       setRequestError(friendlyError);
@@ -537,6 +548,17 @@ export function BookingPage() {
         >
           {bootstrapError?.message ?? 'Nenhum laboratório foi encontrado para este link.'}
         </ErrorMessage>
+      </div>
+    );
+  }
+
+  if (isSubmitting) {
+    return (
+      <div className={styles.statePage}>
+        <Loading
+          label="Salvando agendamento. A agenda será atualizada em instantes…"
+          size="large"
+        />
       </div>
     );
   }

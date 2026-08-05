@@ -211,7 +211,7 @@ function openRegisteredSpreadsheet_(spreadsheetId) {
   }
 }
 
-function spreadsheetForSchool_(school) {
+function registeredSpreadsheetForSchool_(school) {
   var normalizedSchoolId = schoolId_(school, 'school', 'VALIDATION_ERROR');
   var properties = PropertiesService.getScriptProperties();
   var spreadsheetId = optionalText_(
@@ -234,9 +234,20 @@ function spreadsheetForSchool_(school) {
     );
   }
 
-  var spreadsheet = openRegisteredSpreadsheet_(spreadsheetId);
-  assertSpreadsheetSchool_(spreadsheet, normalizedSchoolId);
-  return spreadsheet;
+  return {
+    schoolId: normalizedSchoolId,
+    spreadsheet: openRegisteredSpreadsheet_(spreadsheetId),
+  };
+}
+
+function spreadsheetForSchoolPublicRead_(school) {
+  return registeredSpreadsheetForSchool_(school).spreadsheet;
+}
+
+function spreadsheetForSchool_(school) {
+  var registered = registeredSpreadsheetForSchool_(school);
+  assertSpreadsheetSchool_(registered.spreadsheet, registered.schoolId);
+  return registered.spreadsheet;
 }
 
 function backendAccountEmail_() {
@@ -621,13 +632,10 @@ function isoWeekday_(isoDate) {
 }
 
 function sheetDateToIso_(value, spreadsheet, location) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return Utilities.formatDate(
-      value,
-      spreadsheet.getSpreadsheetTimeZone() || Session.getScriptTimeZone(),
-      'yyyy-MM-dd',
-    );
-  }
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+  // Datas da agenda representam somente o dia, não um instante.
+  return Utilities.formatDate(value, 'UTC', 'yyyy-MM-dd');
+}
   var text = optionalText_(value);
   var brazilian = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
   if (brazilian) {
@@ -647,6 +655,10 @@ function sheetDateToIso_(value, spreadsheet, location) {
 
 function safeSheetText_(value) {
   var text = String(value === null || value === undefined ? '' : value);
+  // Impede o Sheets de converter uma data ISO em objeto Date e deslocar o dia.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return "'" + text;
+  }
   return /^[=+\-@]/.test(text) ? "'" + text : text;
 }
 

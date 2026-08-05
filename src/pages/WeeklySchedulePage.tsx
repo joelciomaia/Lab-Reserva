@@ -50,6 +50,7 @@ export function WeeklySchedulePage() {
       getCurrentAgendaReferenceDate(new Date()),
   );
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const pendingRequestKeyRef = useRef('');
   const [weekRequest, setWeekRequest] = useState<WeekRequestState>({
     key: '',
     data: [],
@@ -71,10 +72,12 @@ export function WeeklySchedulePage() {
       ? data.laboratories.find((candidate) => candidate.id === requestedId)
       : data.laboratories[0];
   }, [data, queryLaboratoryId]);
+  const schoolId = data?.school.id ?? '';
+  const laboratoryId = laboratory?.id ?? '';
   const weekDays = useMemo(() => getSchoolWeek(referenceDate), [referenceDate]);
   const weekStart = startOfWeek(referenceDate, { weekStartsOn: 1 });
   const weekLabel = formatWeekRange(weekStart);
-  const requestKey = `${data?.school.id ?? ''}:${laboratory?.id ?? ''}:${weekDays.map((day) => day.isoDate).join(',')}:${requestVersion}`;
+  const requestKey = `${schoolId}:${laboratoryId}:${weekDays.map((day) => day.isoDate).join(',')}:${requestVersion}`;
   const isLoadingWeek = Boolean(laboratory) && weekRequest.key !== requestKey;
   const weekAvailability = weekRequest.key === requestKey ? weekRequest.data : [];
   const weekError = weekRequest.key === requestKey ? weekRequest.error : null;
@@ -89,17 +92,23 @@ export function WeeklySchedulePage() {
   }, [laboratory]);
 
   useEffect(() => {
-    if (!data || !laboratory) {
+    if (
+      !schoolId ||
+      !laboratoryId ||
+      weekRequest.key === requestKey ||
+      pendingRequestKeyRef.current === requestKey
+    ) {
       return;
     }
 
     let isCurrent = true;
+    pendingRequestKeyRef.current = requestKey;
 
     void Promise.all(
       weekDays.map((day) =>
         client.getAvailability({
-          schoolId: data.school.id,
-          laboratoryId: laboratory.id,
+          schoolId,
+          laboratoryId,
           date: day.isoDate,
         }),
       ),
@@ -113,12 +122,17 @@ export function WeeklySchedulePage() {
         if (isCurrent) {
           setWeekRequest({ key: requestKey, data: [], error: getFriendlyError(error) });
         }
+      })
+      .finally(() => {
+        if (pendingRequestKeyRef.current === requestKey) {
+          pendingRequestKeyRef.current = '';
+        }
       });
 
     return () => {
       isCurrent = false;
     };
-  }, [client, data, laboratory, requestKey, weekDays]);
+  }, [client, laboratoryId, requestKey, schoolId, weekDays, weekRequest.key]);
 
   if (isBootstrapLoading) {
     return (
@@ -149,8 +163,6 @@ export function WeeklySchedulePage() {
     currentSchoolWeek.find((day) => day.isoDate >= today)?.isoDate ??
     getSchoolWeek(addWeeks(new Date(), 1))[0]!.isoDate;
   const suggestedDate = weekDays[0]!.isoDate > today ? weekDays[0]!.isoDate : nextBookableSchoolDay;
-  const laboratoryId = laboratory.id;
-  const schoolId = data.school.id;
   const publicContext = `school=${encodeURIComponent(schoolId)}&lab=${encodeURIComponent(laboratoryId)}`;
   const bookingUrl = `/agendar?${publicContext}&date=${suggestedDate}`;
 
