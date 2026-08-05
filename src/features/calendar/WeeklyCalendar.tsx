@@ -67,6 +67,12 @@ function eventAccessibleDetails(reservation: PeriodReservationSummary): string {
     .join(', ');
 }
 
+function eventPrimaryDetails(reservation: PeriodReservationSummary): string {
+  return [reservation.subject, reservation.classGroup]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(' · ');
+}
+
 export function WeeklyCalendar({
   days,
   periods,
@@ -153,7 +159,7 @@ export function WeeklyCalendar({
         compact: 52,
         dense: 48,
       };
-      const minimumHeight = window.innerWidth >= 768 ? 32 : 28;
+      const minimumHeight = window.innerWidth >= 768 ? 40 : 36;
       const calculatedHeight = Math.floor(
         (availableHeight - headerHeight) / Math.max(orderedPeriods.length, 1),
       );
@@ -339,6 +345,7 @@ export function WeeklyCalendar({
               const { reservation } = event;
               const isNew = reservation.id === newReservationId;
               const details = eventAccessibleDetails(reservation);
+              const primaryDetails = eventPrimaryDetails(reservation);
               const laneWidth = 100 / Math.max(event.laneCount, 1);
               const eventStyle = {
                 gridColumn: dayIndex + 2,
@@ -363,12 +370,11 @@ export function WeeklyCalendar({
                   onClick={() => openEvent(day, event)}
                 >
                   <strong>Reservado</strong>
-                  <span title={reservation.subject}>{reservation.subject || 'Horário indisponível'}</span>
+                  <span title={primaryDetails || undefined}>
+                    {primaryDetails || 'Horário indisponível'}
+                  </span>
                   {reservation.teacherName ? (
                     <span title={reservation.teacherName}>{reservation.teacherName}</span>
-                  ) : null}
-                  {reservation.classGroup ? (
-                    <span title={reservation.classGroup}>{reservation.classGroup}</span>
                   ) : null}
                   <small>
                     {event.startTime}–{event.endTime}
