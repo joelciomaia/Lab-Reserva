@@ -1,0 +1,56 @@
+name: Diagnosticar testes de cancelamento
+
+on:
+  push:
+    paths:
+      - .github/workflows/debug-cancellation-tests.yml
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Aplicar alterações no ambiente de teste
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          workflow = Path('.github/workflows/retry-cancellation-state-and-branding-v3.yml').read_text(encoding='utf-8')
+          start_marker = "          python <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          source = dedent(workflow[start:end])
+          exec(compile(source, 'retry-cancellation-state-and-branding-v3', 'exec'))
+          PY
+
+      - run: npm ci
+
+      - name: Executar testes e salvar saída
+        shell: bash
+        run: |
+          set +e
+          npm run test:run -- --reporter=verbose > test-output.txt 2>&1
+          echo $? > test-exit-code.txt
+          exit 0
+
+      - name: Enviar diagnóstico
+        uses: actions/upload-artifact@v4
+        with:
+          name: cancellation-test-output
+          path: |
+            test-output.txt
+            test-exit-code.txt
+            src/integrations/google/googleReservations.test.ts
+            src/integrations/google/googleReservations.ts
+          retention-days: 1
