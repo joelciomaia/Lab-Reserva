@@ -798,3 +798,23 @@
     padding-inline: 1.25rem;
   }
 }
+
+
+.footerCredits {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+  text-align: end;
+}
+
+.footerCredits a {
+  color: var(--landing-blue);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.footerCredits a:hover { text-decoration: underline; }
+
+@media (max-width: 48rem) {
+  .footerCredits { justify-items: start; text-align: start; }
+}

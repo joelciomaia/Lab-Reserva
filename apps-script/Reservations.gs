@@ -1,5 +1,5 @@
 function readReservations_(spreadsheet) {
-  var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_);
+  var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_.slice(0, 13));
   var reservations = [];
   var seenIds = Object.create(null);
 
@@ -28,6 +28,33 @@ function readReservations_(spreadsheet) {
       uniquePeriodIds[periodIds[periodIndex]] = true;
     }
 
+    var storedStatus = cellText_(tableCell_(table, row, 'STATUS'));
+  var rawCancelledPeriodIds = splitList_(tableCell_(table, row, 'AULAS_CANCELADAS_IDS'));
+  var cancelledSeen = Object.create(null);
+  var cancelledPeriodIds = [];
+  for (var cancelledIndex = 0; cancelledIndex < rawCancelledPeriodIds.length; cancelledIndex += 1) {
+    var cancelledPeriodId = rawCancelledPeriodIds[cancelledIndex];
+    if (!uniquePeriodIds[cancelledPeriodId]) {
+      throwApiError_(
+        'DATA_INTEGRITY_ERROR',
+        location + ' cancela uma aula que não pertence à reserva.',
+      );
+    }
+    if (!cancelledSeen[cancelledPeriodId]) {
+      cancelledSeen[cancelledPeriodId] = true;
+      cancelledPeriodIds.push(cancelledPeriodId);
+    }
+  }
+  if (storedStatus === RESERVATION_STATUS_.CANCELLED && cancelledPeriodIds.length === 0) {
+    cancelledPeriodIds = periodIds.slice();
+  }
+  var status =
+    cancelledPeriodIds.length === periodIds.length
+      ? RESERVATION_STATUS_.CANCELLED
+      : cancelledPeriodIds.length > 0
+        ? RESERVATION_STATUS_.PARTIALLY_CANCELLED
+        : RESERVATION_STATUS_.CONFIRMED;
+
     reservations.push({
       id: id,
       date: sheetDateToIso_(tableCell_(table, row, 'DATA'), spreadsheet, location + ' (DATA)'),
@@ -39,6 +66,8 @@ function readReservations_(spreadsheet) {
       periodIds: periodIds,
       periodLabels: splitList_(tableCell_(table, row, 'AULAS_NOMES')),
       periodTimes: splitList_(tableCell_(table, row, 'AULAS_HORARIOS')),
+      cancelledPeriodIds: cancelledPeriodIds,
+      status: status,
       knowledgeObjects: cellText_(tableCell_(table, row, 'OBJETOS_CONHECIMENTO')),
       itemsUsed: cellText_(tableCell_(table, row, 'ITENS_UTILIZADOS')),
       notes: cellText_(tableCell_(table, row, 'OBSERVACOES')),
@@ -116,11 +145,18 @@ function findPeriodForReservationEntry_(periodId, index, periods) {
   return periods[index] && periods[index].id === periodId ? periods[index] : null;
 }
 
-function reservationEntries_(reservation, periods, cancelled) {
+function reservationEntries_(reservation, periods) {
   var entries = [];
+  if (reservation.status === RESERVATION_STATUS_.CANCELLED) {
+    return entries;
+  }
+  var cancelledPeriodIds = Object.create(null);
+  for (var cancelledIndex = 0; cancelledIndex < reservation.cancelledPeriodIds.length; cancelledIndex += 1) {
+    cancelledPeriodIds[reservation.cancelledPeriodIds[cancelledIndex]] = true;
+  }
   for (var index = 0; index < reservation.periodIds.length; index += 1) {
     var periodId = reservation.periodIds[index];
-    if (cancelled[cancellationKey_(reservation.id, periodId)]) continue;
+    if (cancelledPeriodIds[periodId]) continue;
     var configuredPeriod = findPeriodForReservationEntry_(periodId, index, periods);
     var time = parsePeriodTime_(reservation.periodTimes[index]);
     if (!time && configuredPeriod) {
@@ -141,12 +177,12 @@ function entryConflictsWithPeriod_(entry, period) {
   return periodsOverlap_(entry.time, periodTime);
 }
 
-function occupyingReservations_(reservations, cancelled, periods, laboratoryId, date, period) {
+function occupyingReservations_(reservations, periods, laboratoryId, date, period) {
   var occupying = [];
   for (var reservationIndex = 0; reservationIndex < reservations.length; reservationIndex += 1) {
     var reservation = reservations[reservationIndex];
     if (reservation.laboratoryId !== laboratoryId || reservation.date !== date) continue;
-    var entries = reservationEntries_(reservation, periods, cancelled);
+    var entries = reservationEntries_(reservation, periods);
     for (var entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
       if (entryConflictsWithPeriod_(entries[entryIndex], period)) {
         occupying.push(reservation);
@@ -178,7 +214,6 @@ function availabilityContext_(school, laboratoryId) {
     configuration: configuration,
     laboratory: laboratory,
     reservations: readReservations_(spreadsheet),
-    cancelled: cancellationSet_(readCancellations_(spreadsheet)),
   };
 }
 
@@ -191,7 +226,6 @@ function buildAvailabilityResponse_(context, laboratoryId, date) {
     var period = applicable[index];
     var occupying = occupyingReservations_(
       context.reservations,
-      context.cancelled,
       context.configuration.periods,
       laboratoryId,
       date,
@@ -313,12 +347,10 @@ function createReservation_(school, rawRequest) {
     }
 
     var reservations = readReservations_(spreadsheet);
-    var cancelled = cancellationSet_(readCancellations_(spreadsheet));
     var maxConcurrentClasses = laboratory.maxConcurrentClasses || 1;
     for (var periodIndex = 0; periodIndex < selected.length; periodIndex += 1) {
       var conflicts = occupyingReservations_(
         reservations,
-        cancelled,
         configuration.periods,
         laboratory.id,
         request.date,
@@ -361,7 +393,7 @@ function createReservation_(school, rawRequest) {
       status: RESERVATION_STATUS_.CONFIRMED,
     };
 
-    var sheet = spreadsheet.getSheetByName(RESERVATIONS_SHEET_NAME_);
+    var sheet = ensureAppendOnlySheet_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_, 13);
     appendImmutableRow_(sheet, [
       reservation.id,
       reservation.date,
@@ -377,6 +409,11 @@ function createReservation_(school, rawRequest) {
       reservation.notes,
       reservation.createdAt,
       serializeList_(reservation.periodTimes),
+      reservation.status,
+      '',
+      '',
+      '',
+      '',
     ]);
     SpreadsheetApp.flush();
     return {

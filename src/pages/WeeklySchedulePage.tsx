@@ -272,6 +272,13 @@ export function WeeklySchedulePage() {
           </>
         ) : null}
       </section>
+
+      <footer className={styles.developerFooter}>
+        <span>© 2026 Lab Reserva · Desenvolvido por Joelcio Maia</span>
+        <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
+          Portfólio do desenvolvedor
+        </a>
+      </footer>
     </div>
   );
 }

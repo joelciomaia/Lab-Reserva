@@ -155,7 +155,6 @@ function fastAvailabilityContextFromSpreadsheet_(spreadsheet, laboratoryId, conf
     configuration: configuration,
     laboratory: laboratory,
     reservations: readReservations_(spreadsheet),
-    cancelled: cancellationSet_(readCancellations_(spreadsheet)),
   };
 }
 

@@ -64,6 +64,11 @@ export const RESERVATIONS_HEADER: readonly string[] = [
   'OBSERVACOES',
   'CRIADO_EM',
   'AULAS_HORARIOS',
+  'STATUS',
+  'AULAS_CANCELADAS_IDS',
+  'CANCELADO_EM',
+  'CANCELADO_POR',
+  'MOTIVO_CANCELAMENTO',
 ];
 
 export const CANCELLATIONS_HEADER: readonly string[] = [

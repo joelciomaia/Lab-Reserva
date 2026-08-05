@@ -50,7 +50,8 @@ const features = [
   {
     icon: FileSpreadsheet,
     title: 'Histórico preservado',
-    description: 'Reservas e cancelamentos ficam registrados sem apagar as linhas originais.',
+    description:
+      'O estado atual fica na reserva e cada cancelamento continua registrado para auditoria.',
   },
 ] as const;
 
@@ -299,7 +300,15 @@ export function LandingPage() {
           </span>
           <p>Agenda de laboratórios conectada ao Google Sheets.</p>
         </div>
-        <span>Feito para simplificar a rotina escolar.</span>
+        <div className={styles.footerCredits}>
+          <span>Feito para simplificar a rotina escolar.</span>
+          <span>
+            © 2026 Lab Reserva · Desenvolvido por Joelcio Maia ·{' '}
+            <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
+              Portfólio do desenvolvedor
+            </a>
+          </span>
+        </div>
       </footer>
     </div>
   );

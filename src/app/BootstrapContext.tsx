@@ -113,7 +113,7 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
             }
             setBookingOptionsError(null);
             setData((currentData) =>
-              currentData && currentData.school.id === bootstrapData.school.id
+              currentData?.school.id === bootstrapData.school.id
                 ? { ...currentData, ...options }
                 : currentData,
             );

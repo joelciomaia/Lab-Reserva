@@ -18,16 +18,12 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 function requestUrl(input: RequestInfo | URL): string {
-  if (typeof input === 'string') {
-    return input;
-  }
+  if (typeof input === 'string') return input;
   return input instanceof URL ? input.href : input.url;
 }
 
 function parseRequestBody(body: BodyInit | null | undefined): unknown {
-  if (typeof body !== 'string') {
-    throw new Error('O teste esperava um corpo JSON em texto.');
-  }
+  if (typeof body !== 'string') throw new Error('Corpo JSON ausente.');
   return JSON.parse(body) as unknown;
 }
 
@@ -44,6 +40,8 @@ function reservationRow(
   periodIds = '["P01","P02"]',
   periodLabels = '["1ª aula","2ª aula"]',
   periodTimes = '["07:30–08:15","08:15–09:00"]',
+  status = 'CONFIRMED',
+  cancelledPeriodIds = '',
 ): unknown[] {
   return [
     id,
@@ -60,6 +58,11 @@ function reservationRow(
     'Atividade em duplas',
     '2026-08-01T12:00:00.000Z',
     periodTimes,
+    status,
+    cancelledPeriodIds,
+    '',
+    '',
+    '',
   ];
 }
 
@@ -86,16 +89,16 @@ function cancellationRow(
 
 function completeSheetMetadata() {
   return {
-    sheets: [GOOGLE_RESERVATIONS_SHEET_TITLE, GOOGLE_CANCELLATIONS_SHEET_TITLE].map((title) => ({
-      properties: { title },
-    })),
+    sheets: [GOOGLE_RESERVATIONS_SHEET_TITLE, GOOGLE_CANCELLATIONS_SHEET_TITLE].map(
+      (title) => ({ properties: { title } }),
+    ),
   };
 }
 
 function createOperationalFetch(
   reservations: unknown[][],
   cancellations: unknown[][],
-  onAppend: (body: unknown) => void,
+  updates: unknown[],
 ): GoogleReservationsFetch {
   return createFetchMock((url, init) => {
     if (url.includes('?fields=sheets.properties')) {
@@ -115,19 +118,18 @@ function createOperationalFetch(
         valueRanges: [{ values: reservations }, { values: cancellations }],
       });
     }
-    if (url.includes(':append?')) {
-      onAppend(parseRequestBody(init?.body));
-      return jsonResponse({ updates: { updatedRows: 1 } });
+    if (url.includes('/values:batchUpdate')) {
+      updates.push(parseRequestBody(init?.body));
+      return jsonResponse({ totalUpdatedRows: 2 });
     }
     throw new Error(`Requisição inesperada: ${url}`);
   });
 }
 
 describe('persistência de reservas no Google Sheets', () => {
-  it('lê a estrutura legada de RESERVAS sem exigir AULAS_HORARIOS', () => {
-    const legacyHeader = GOOGLE_RESERVATIONS_HEADER.slice(0, -1);
-    const legacyRow = reservationRow('RES-LEGACY', 'P01; P02', '1ª aula; 2ª aula').slice(0, -1);
-
+  it('lê a estrutura legada sem exigir colunas de estado', () => {
+    const legacyHeader = GOOGLE_RESERVATIONS_HEADER.slice(0, 13);
+    const legacyRow = reservationRow('RES-LEGACY').slice(0, 13);
     const [reservation] = parseGoogleReservations(
       [[...legacyHeader], legacyRow],
       [[...GOOGLE_CANCELLATIONS_HEADER]],
@@ -135,31 +137,24 @@ describe('persistência de reservas no Google Sheets', () => {
 
     expect(reservation).toMatchObject({
       id: 'RES-LEGACY',
-      periodIds: ['P01', 'P02'],
-      periodLabels: ['1ª aula', '2ª aula'],
-      periodTimes: [],
       activePeriodIds: ['P01', 'P02'],
       cancelledPeriodIds: [],
       status: 'CONFIRMED',
-      cancellations: [],
     });
   });
 
-  it('deriva estados parcial e total exclusivamente do histórico de CANCELAMENTOS', () => {
+  it('combina o estado atual da reserva com o histórico de auditoria', () => {
     const reservations = [
       [...GOOGLE_RESERVATIONS_HEADER],
-      reservationRow('RES-PARTIAL'),
-      reservationRow('RES-TOTAL'),
+      reservationRow('RES-PARTIAL', undefined, undefined, undefined, 'PARTIALLY_CANCELLED', '["P02"]'),
+      reservationRow('RES-TOTAL', undefined, undefined, undefined, 'CANCELLED', '["P01","P02"]'),
     ];
     const cancellations = [
       [...GOOGLE_CANCELLATIONS_HEADER],
       cancellationRow('C-1', 'RES-PARTIAL', 'P02', '2ª aula', '08:15–09:00'),
-      cancellationRow('C-2', 'RES-TOTAL', 'P01', '1ª aula', '07:30–08:15'),
-      cancellationRow('C-3', 'RES-TOTAL', 'P02', '2ª aula', '08:15–09:00'),
     ];
 
     const result = parseGoogleReservations(reservations, cancellations);
-
     expect(result[0]).toMatchObject({
       status: 'PARTIALLY_CANCELLED',
       activePeriodIds: ['P01'],
@@ -172,28 +167,30 @@ describe('persistência de reservas no Google Sheets', () => {
     });
   });
 
-  it('acrescenta somente o novo cabeçalho e cria CANCELAMENTOS sem regravar RESERVAS', async () => {
-    let structuralUpdate: unknown;
-    let valuesUpdate: unknown;
-    const legacyHeader = GOOGLE_RESERVATIONS_HEADER.slice(0, -1);
+  it('adiciona somente os cabeçalhos ausentes nas planilhas existentes', async () => {
+    const structuralUpdates: unknown[] = [];
+    const valuesUpdates: unknown[] = [];
     const fetchImplementation = createFetchMock((url, init) => {
       if (url.includes('?fields=sheets.properties')) {
         return jsonResponse({
           sheets: [{ properties: { title: GOOGLE_RESERVATIONS_SHEET_TITLE } }],
         });
       }
-      if (url.endsWith('/values:batchUpdate')) {
-        valuesUpdate = parseRequestBody(init?.body);
+      if (url.includes('/values:batchGet?')) {
+        return jsonResponse({
+          valueRanges: [
+            { values: [[...GOOGLE_RESERVATIONS_HEADER.slice(0, 13)]] },
+            {},
+          ],
+        });
+      }
+      if (url.includes('/values:batchUpdate')) {
+        valuesUpdates.push(parseRequestBody(init?.body));
         return jsonResponse({});
       }
       if (url.endsWith(':batchUpdate')) {
-        structuralUpdate = parseRequestBody(init?.body);
+        structuralUpdates.push(parseRequestBody(init?.body));
         return jsonResponse({});
-      }
-      if (url.includes('/values:batchGet?')) {
-        return jsonResponse({
-          valueRanges: [{ values: [[...legacyHeader]] }, {}],
-        });
       }
       throw new Error(`Requisição inesperada: ${url}`);
     });
@@ -205,40 +202,22 @@ describe('persistência de reservas no Google Sheets', () => {
     });
 
     expect(result.createdSheetTitles).toEqual([GOOGLE_CANCELLATIONS_SHEET_TITLE]);
-    expect(structuralUpdate).toEqual({
-      requests: [{ addSheet: { properties: { title: GOOGLE_CANCELLATIONS_SHEET_TITLE } } }],
-    });
-    const data = (valuesUpdate as { data: { range: string; values: unknown[][] }[] }).data;
-    expect(data).toEqual([
-      {
-        range: "'RESERVAS'!N1",
-        majorDimension: 'ROWS',
-        values: [['AULAS_HORARIOS']],
-      },
-      {
-        range: "'CANCELAMENTOS'!A1",
-        majorDimension: 'ROWS',
-        values: [[...GOOGLE_CANCELLATIONS_HEADER]],
-      },
+    expect(structuralUpdates).toHaveLength(1);
+    expect(valuesUpdates).toHaveLength(1);
+    const data = (valuesUpdates[0] as { data: { range: string }[] }).data;
+    expect(data.map((item) => item.range)).toEqual([
+      "'RESERVAS'!N1",
+      "'RESERVAS'!O1",
+      "'RESERVAS'!P1",
+      "'RESERVAS'!Q1",
+      "'RESERVAS'!R1",
+      "'RESERVAS'!S1",
+      "'CANCELAMENTOS'!A1",
     ]);
-    expect(
-      data.some(
-        (item) =>
-          item.range.includes(GOOGLE_RESERVATIONS_SHEET_TITLE) && item.range !== "'RESERVAS'!N1",
-      ),
-    ).toBe(false);
   });
 
-  it('cancela parcialmente por append e mantém as demais aulas ativas', async () => {
-    let appendBody: unknown;
-    const fetchImplementation = createOperationalFetch(
-      [[...GOOGLE_RESERVATIONS_HEADER], reservationRow('RES-1')],
-      [[...GOOGLE_CANCELLATIONS_HEADER]],
-      (body) => {
-        appendBody = body;
-      },
-    );
-
+  it('cancela parcialmente, atualiza RESERVAS e grava auditoria', async () => {
+    const updates: unknown[] = [];
     const result = await cancelGoogleReservationPeriods(
       {
         reservationId: 'RES-1',
@@ -250,49 +229,33 @@ describe('persistência de reservas no Google Sheets', () => {
       {
         accessToken: 'access-token',
         spreadsheetId: 'sheet-1',
-        fetchImplementation,
+        fetchImplementation: createOperationalFetch(
+          [[...GOOGLE_RESERVATIONS_HEADER], reservationRow('RES-1')],
+          [[...GOOGLE_CANCELLATIONS_HEADER]],
+          updates,
+        ),
         createCancellationId: () => 'CANCEL-1',
       },
     );
 
-    expect(appendBody).toEqual({
-      majorDimension: 'ROWS',
-      values: [
-        [
-          'CANCEL-1',
-          'RES-1',
-          'P02',
-          '2ª aula',
-          '08:15–09:00',
-          '2026-08-10',
-          'LAB01',
-          '2026-08-02T11:00:00.000Z',
-          'laboratorista@escola.test',
-          'Professor escolheu a aula errada',
-        ],
-      ],
-    });
+    expect(updates).toHaveLength(1);
+    const data = (updates[0] as { data: { range: string; values: unknown[][] }[] }).data;
+    expect(data.find((item) => item.range === "'RESERVAS'!O2")?.values).toEqual([
+      ['PARTIALLY_CANCELLED'],
+    ]);
+    expect(data.find((item) => item.range === "'RESERVAS'!P2")?.values).toEqual([
+      ['["P02"]'],
+    ]);
+    expect(data.find((item) => item.range === "'CANCELAMENTOS'!A2:J2")?.values).toHaveLength(1);
     expect(result.reservation).toMatchObject({
       status: 'PARTIALLY_CANCELLED',
       activePeriodIds: ['P01'],
       cancelledPeriodIds: ['P02'],
     });
-    expect(result.appendedCancellations).toHaveLength(1);
   });
 
-  it('transforma o cancelamento parcial em total sem duplicar a aula já cancelada', async () => {
-    let appendBody: unknown;
-    const fetchImplementation = createOperationalFetch(
-      [[...GOOGLE_RESERVATIONS_HEADER], reservationRow('RES-2')],
-      [
-        [...GOOGLE_CANCELLATIONS_HEADER],
-        cancellationRow('CANCEL-OLD', 'RES-2', 'P01', '1ª aula', '07:30–08:15'),
-      ],
-      (body) => {
-        appendBody = body;
-      },
-    );
-
+  it('converte cancelamento parcial em total sem duplicar auditoria', async () => {
+    const updates: unknown[] = [];
     const result = await cancelGoogleReservationPeriods(
       {
         reservationId: 'RES-2',
@@ -303,19 +266,39 @@ describe('persistência de reservas no Google Sheets', () => {
       {
         accessToken: 'access-token',
         spreadsheetId: 'sheet-1',
-        fetchImplementation,
+        fetchImplementation: createOperationalFetch(
+          [
+            [...GOOGLE_RESERVATIONS_HEADER],
+            reservationRow(
+              'RES-2',
+              undefined,
+              undefined,
+              undefined,
+              'PARTIALLY_CANCELLED',
+              '["P01"]',
+            ),
+          ],
+          [
+            [...GOOGLE_CANCELLATIONS_HEADER],
+            cancellationRow('CANCEL-OLD', 'RES-2', 'P01', '1ª aula', '07:30–08:15'),
+          ],
+          updates,
+        ),
         createCancellationId: () => 'CANCEL-NEW',
       },
     );
 
-    const values = (appendBody as { values: unknown[][] }).values;
-    expect(values).toHaveLength(1);
-    expect(values[0]?.[2]).toBe('P02');
+    const data = (updates[0] as { data: { range: string; values: unknown[][] }[] }).data;
+    expect(data.find((item) => item.range === "'RESERVAS'!O2")?.values).toEqual([
+      ['CANCELLED'],
+    ]);
+    const audit = data.find((item) => item.range === "'CANCELAMENTOS'!A3:J3");
+    expect(audit?.values).toHaveLength(1);
+    expect(audit?.values[0]?.[2]).toBe('P02');
     expect(result.reservation).toMatchObject({
       status: 'CANCELLED',
       activePeriodIds: [],
       cancelledPeriodIds: ['P01', 'P02'],
     });
-    expect(result.reservation.cancellations).toHaveLength(2);
   });
 });

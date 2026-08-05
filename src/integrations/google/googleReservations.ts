@@ -5,10 +5,7 @@ const GOOGLE_SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
 export const GOOGLE_RESERVATIONS_SHEET_TITLE = 'RESERVAS';
 export const GOOGLE_CANCELLATIONS_SHEET_TITLE = 'CANCELAMENTOS';
 
-export const GOOGLE_RESERVATIONS_HEADER = [
-  ...RESERVATIONS_HEADER.filter((header) => header !== 'AULAS_HORARIOS'),
-  'AULAS_HORARIOS',
-] as const;
+export const GOOGLE_RESERVATIONS_HEADER = [...RESERVATIONS_HEADER] as const;
 
 export const GOOGLE_CANCELLATIONS_HEADER = [
   'ID',
@@ -161,6 +158,11 @@ interface ReservationBase {
   itemsUsed: string;
   notes: string;
   createdAt: string;
+  storedStatus: GoogleReservationStatus;
+  storedCancelledPeriodIds: string[];
+  lastCancelledAt: string;
+  lastCancelledBy: string;
+  lastCancellationReason: string;
 }
 
 function resolveFetch(fetchImplementation?: GoogleReservationsFetch): GoogleReservationsFetch {
@@ -566,6 +568,14 @@ function parseReservationRows(values: readonly (readonly unknown[])[]): Reservat
         itemsUsed: getCell(row, headerIndex, 'ITENS_UTILIZADOS'),
         notes: getCell(row, headerIndex, 'OBSERVACOES'),
         createdAt: getCell(row, headerIndex, 'CRIADO_EM'),
+        storedStatus:
+          (getCell(row, headerIndex, 'STATUS') as GoogleReservationStatus) || 'CONFIRMED',
+        storedCancelledPeriodIds: unique(
+          parseListCell(getCell(row, headerIndex, 'AULAS_CANCELADAS_IDS')),
+        ),
+        lastCancelledAt: getCell(row, headerIndex, 'CANCELADO_EM'),
+        lastCancelledBy: getCell(row, headerIndex, 'CANCELADO_POR'),
+        lastCancellationReason: getCell(row, headerIndex, 'MOTIVO_CANCELAMENTO'),
       },
     ];
   });
@@ -627,7 +637,13 @@ function deriveReservation(
     (cancellation) =>
       cancellation.reservationId === reservation.id && periodIdSet.has(cancellation.periodId),
   );
-  const cancelledSet = new Set(cancellations.map((cancellation) => cancellation.periodId));
+  const cancelledSet = new Set([
+    ...reservation.storedCancelledPeriodIds,
+    ...cancellations.map((cancellation) => cancellation.periodId),
+  ]);
+  if (reservation.storedStatus === 'CANCELLED' && cancelledSet.size === 0) {
+    reservation.periodIds.forEach((periodId) => cancelledSet.add(periodId));
+  }
   const cancelledPeriodIds = reservation.periodIds.filter((periodId) => cancelledSet.has(periodId));
   const activePeriodIds = reservation.periodIds.filter((periodId) => !cancelledSet.has(periodId));
   const status: GoogleReservationStatus =
@@ -717,6 +733,11 @@ function createUpdatedReservation(
     itemsUsed: reservation.itemsUsed,
     notes: reservation.notes,
     createdAt: reservation.createdAt,
+    storedStatus: reservation.status,
+    storedCancelledPeriodIds: reservation.cancelledPeriodIds,
+    lastCancelledAt: reservation.cancellations.at(-1)?.cancelledAt ?? '',
+    lastCancelledBy: reservation.cancellations.at(-1)?.cancelledBy ?? '',
+    lastCancellationReason: reservation.cancellations.at(-1)?.reason ?? '',
   };
   return deriveReservation(base, [...reservation.cancellations, ...appendedCancellations]);
 }
@@ -739,7 +760,17 @@ export async function cancelGoogleReservationPeriods(
     );
   }
 
-  const reservations = await listReservations(normalizedOptions);
+  const schema = await ensureSchema(normalizedOptions);
+  const values = await requestGoogleApi<BatchGetValuesResponse>(
+    normalizedOptions,
+    batchGetUrl(normalizedOptions.spreadsheetId, [
+      `${quoteSheetTitle(GOOGLE_RESERVATIONS_SHEET_TITLE)}!A:ZZ`,
+      `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A:ZZ`,
+    ]),
+  );
+  const reservationValues = values.valueRanges?.[0]?.values ?? [];
+  const cancellationValues = values.valueRanges?.[1]?.values ?? [];
+  const reservations = parseGoogleReservations(reservationValues, cancellationValues);
   const reservation = reservations.find((candidate) => candidate.id === reservationId);
   if (!reservation) {
     throw new GoogleReservationsIntegrationError(
@@ -791,31 +822,74 @@ export async function cancelGoogleReservationPeriods(
     };
   });
 
-  const appendRange = `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A:J`;
-  const params = new URLSearchParams({
-    valueInputOption: 'RAW',
-    insertDataOption: 'INSERT_ROWS',
+  const reservationHeader = reservationValues[0] ?? schema.reservationsHeader;
+  const reservationHeaderIndex = createHeaderIndex(
+    reservationHeader,
+    GOOGLE_RESERVATIONS_SHEET_TITLE,
+  );
+  const reservationRowIndex = reservationValues.slice(1).findIndex(
+    (row) => getCell(row, reservationHeaderIndex, 'ID') === reservation.id,
+  );
+  if (reservationRowIndex < 0) {
+    throw new GoogleReservationsIntegrationError(
+      'RESERVATION_NOT_FOUND',
+      'O agendamento não foi encontrado na planilha.',
+    );
+  }
+  const reservationRowNumber = reservationRowIndex + 2;
+  const updatedCancelledPeriodIds = unique([
+    ...reservation.cancelledPeriodIds,
+    ...periodIdsToAppend,
+  ]);
+  const updatedStatus: GoogleReservationStatus =
+    updatedCancelledPeriodIds.length === reservation.periodIds.length
+      ? 'CANCELLED'
+      : 'PARTIALLY_CANCELLED';
+  const stateValues: Readonly<Record<string, string>> = {
+    STATUS: updatedStatus,
+    AULAS_CANCELADAS_IDS: JSON.stringify(updatedCancelledPeriodIds),
+    CANCELADO_EM: cancelledAt,
+    CANCELADO_POR: cancelledBy,
+    MOTIVO_CANCELAMENTO: reason,
+  };
+  const updateData = Object.entries(stateValues).map(([headerName, value]) => {
+    const columnIndex = reservationHeaderIndex.get(normalizeHeader(headerName));
+    if (columnIndex === undefined) {
+      throw new GoogleReservationsIntegrationError(
+        'INVALID_SCHEMA',
+        `A aba ${GOOGLE_RESERVATIONS_SHEET_TITLE} não possui a coluna ${headerName}.`,
+      );
+    }
+    return {
+      range: `${quoteSheetTitle(GOOGLE_RESERVATIONS_SHEET_TITLE)}!${columnName(columnIndex + 1)}${reservationRowNumber}`,
+      majorDimension: 'ROWS',
+      values: [[value]],
+    };
+  });
+  const firstCancellationRow = Math.max(2, cancellationValues.length + 1);
+  const lastCancellationRow = firstCancellationRow + appendedCancellations.length - 1;
+  updateData.push({
+    range: `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A${firstCancellationRow}:J${lastCancellationRow}`,
+    majorDimension: 'ROWS',
+    values: appendedCancellations.map((cancellation) => [
+      cancellation.id,
+      cancellation.reservationId,
+      cancellation.periodId,
+      cancellation.periodLabel,
+      cancellation.periodTime,
+      cancellation.date,
+      cancellation.laboratoryId,
+      cancellation.cancelledAt,
+      cancellation.cancelledBy,
+      cancellation.reason,
+    ]),
   });
   await requestGoogleApi<unknown>(
     normalizedOptions,
-    `${GOOGLE_SHEETS_API_URL}/${encodeURIComponent(normalizedOptions.spreadsheetId)}/values/${encodeURIComponent(appendRange)}:append?${params.toString()}`,
+    `${GOOGLE_SHEETS_API_URL}/${encodeURIComponent(normalizedOptions.spreadsheetId)}/values:batchUpdate`,
     {
       method: 'POST',
-      body: JSON.stringify({
-        majorDimension: 'ROWS',
-        values: appendedCancellations.map((cancellation) => [
-          cancellation.id,
-          cancellation.reservationId,
-          cancellation.periodId,
-          cancellation.periodLabel,
-          cancellation.periodTime,
-          cancellation.date,
-          cancellation.laboratoryId,
-          cancellation.cancelledAt,
-          cancellation.cancelledBy,
-          cancellation.reason,
-        ]),
-      }),
+      body: JSON.stringify({ valueInputOption: 'RAW', data: updateData }),
     },
   );
 

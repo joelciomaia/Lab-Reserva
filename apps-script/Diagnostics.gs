@@ -73,17 +73,10 @@ function diagnosticWeek_(school, request) {
   var reservations = diagnosticMeasure_(timings, 'lerReservasMs', function () {
     return readReservations_(spreadsheet);
   });
-  var cancellations = diagnosticMeasure_(timings, 'lerCancelamentosMs', function () {
-    return readCancellations_(spreadsheet);
-  });
-  var cancelled = diagnosticMeasure_(timings, 'processarCancelamentosMs', function () {
-    return cancellationSet_(cancellations);
-  });
   var context = {
     configuration: configuration,
     laboratory: laboratory,
     reservations: reservations,
-    cancelled: cancelled,
   };
   var responses = diagnosticMeasure_(timings, 'montarDisponibilidadeMs', function () {
     return dates.map(function (date) {
@@ -103,7 +96,9 @@ function diagnosticWeek_(school, request) {
       dates: dates.length,
       periods: configuration.periods.length,
       reservations: reservations.length,
-      cancellations: cancellations.length,
+      cancelledReservations: reservations.filter(function (reservation) {
+        return reservation.status !== RESERVATION_STATUS_.CONFIRMED;
+      }).length,
     },
     responseBytes: responseBytes,
   };

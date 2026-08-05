@@ -210,3 +210,25 @@
     gap: var(--space-4);
   }
 }
+
+
+.developerFooter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.65rem;
+  padding-block: var(--space-5) var(--space-2);
+  margin-top: var(--space-5);
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+.developerFooter a {
+  color: var(--color-brand-700);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.developerFooter a:hover { text-decoration: underline; }
