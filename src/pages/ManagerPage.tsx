@@ -24,7 +24,11 @@ import {
   createClassPeriods,
   createDefaultLaboratoryAdminConfiguration,
   DEFAULT_BOOKING_FORM_CONFIGURATION,
+  DEFAULT_CLASS_GROUPS,
+  DEFAULT_RESOURCES,
   DEFAULT_SED_SC_CONFIGURATION,
+  DEFAULT_SHIFTS,
+  DEFAULT_SUBJECTS,
   getShiftEndTime,
   isGoogleChatSpaceName,
   isDeferredSetupValidationIssue,
@@ -139,6 +143,16 @@ function createEmptySchoolConfiguration(): AdminConfiguration {
     bookingForm: structuredClone(DEFAULT_BOOKING_FORM_CONFIGURATION),
     laboratorySettings: [],
     sedSc: structuredClone(DEFAULT_SED_SC_CONFIGURATION),
+  };
+}
+
+function withDefaultConfigurationValues(configuration: AdminConfigurationDraft): AdminConfigurationDraft {
+  return {
+    ...configuration,
+    shifts: [...configuration.shifts],
+    classGroups: [...configuration.classGroups],
+    subjects: [...configuration.subjects],
+    resources: [...configuration.resources],
   };
 }
 
@@ -405,7 +419,8 @@ export function ManagerPage({ onActivateGoogleChat }: ManagerPageProps) {
     setSaveError(null);
     setSuccessMessage('');
     try {
-      let configurationForGoogle = pendingGoogleSync ?? savedConfiguration;
+      const normalizedDraft = withDefaultConfigurationValues(draft);
+      let configurationForGoogle: AdminConfiguration | null = pendingGoogleSync;
 
       if (isDirty) {
         if (supportsAdminConfiguration(client)) {
@@ -438,18 +453,25 @@ export function ManagerPage({ onActivateGoogleChat }: ManagerPageProps) {
           const pendingConfigurationAlreadyWritten = Boolean(
             pendingGoogleSync &&
             currentGoogleConfiguration?.revision === pendingGoogleSync.revision &&
-            JSON.stringify(draft) === JSON.stringify(toDraft(pendingGoogleSync)),
+            JSON.stringify(normalizedDraft) === JSON.stringify(toDraft(pendingGoogleSync)),
           );
           if (pendingConfigurationAlreadyWritten && pendingGoogleSync) {
             configurationForGoogle = pendingGoogleSync;
           } else {
             configurationForGoogle = {
               revision: createRevision(),
-              ...structuredClone(draft),
-            };
+              ...structuredClone(normalizedDraft),
+            } as AdminConfiguration;
           }
         }
         setPendingGoogleSync(configurationForGoogle);
+      }
+
+      if (!configurationForGoogle) {
+        configurationForGoogle = {
+          revision: savedConfiguration.revision,
+          ...structuredClone(normalizedDraft),
+        } as AdminConfiguration;
       }
 
       try {

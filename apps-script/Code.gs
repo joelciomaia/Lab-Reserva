@@ -70,6 +70,10 @@ function doPost(event) {
   });
 }
 
+function doOptions() {
+  return jsonOutput_({ ok: true, data: null });
+}
+
 function respondSafely_(operation) {
   try {
     return jsonOutput_({ ok: true, data: operation() });
@@ -97,7 +101,9 @@ function respondSafely_(operation) {
 }
 
 function jsonOutput_(value) {
-  return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(
-    ContentService.MimeType.JSON,
-  );
+  return ContentService.createTextOutput(JSON.stringify(value))
+    .setMimeType(ContentService.MimeType.JSON)
+    .setHeader('Access-Control-Allow-Origin', '*')
+    .setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
