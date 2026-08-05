@@ -15,7 +15,7 @@ interface ApiFailure {
 export type AppsScriptEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
 const RESPONSE_SOURCE = 'lab-reserva-apps-script';
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 45_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -57,10 +57,21 @@ function appendHiddenInput(form: HTMLFormElement, name: string, value: string): 
   form.append(input);
 }
 
+function encodePayload(payload: Record<string, unknown>): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  let binary = '';
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
+}
+
 /**
  * Envia uma operação ao Web App do Apps Script por formulário e recebe a
- * resposta por postMessage. Esse transporte evita CORS sem expor token,
- * spreadsheetId ou credenciais no link público.
+ * resposta por postMessage. O payload segue em Base64 URL-safe para não ser
+ * alterado pelo application/x-www-form-urlencoded usado pelo formulário.
  */
 export function callAppsScriptViaForm<T>(
   endpoint: string,
@@ -76,10 +87,17 @@ export function callAppsScriptViaForm<T>(
   const frameName = `lab-reserva-apps-script-${requestId.replace(/[^A-Za-z0-9_-]/g, '')}`;
   const iframe = document.createElement('iframe');
   iframe.name = frameName;
-  iframe.hidden = true;
   iframe.tabIndex = -1;
   iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.display = 'none';
+  iframe.title = '';
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-10000px';
+  iframe.style.top = '-10000px';
+  iframe.style.width = '1px';
+  iframe.style.height = '1px';
+  iframe.style.border = '0';
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
 
   const form = document.createElement('form');
   form.method = 'POST';
@@ -91,7 +109,7 @@ export function callAppsScriptViaForm<T>(
   appendHiddenInput(form, 'transport', 'iframe');
   appendHiddenInput(form, 'requestId', requestId);
   appendHiddenInput(form, 'origin', window.location.origin);
-  appendHiddenInput(form, 'payload', JSON.stringify(payload));
+  appendHiddenInput(form, 'payloadBase64', encodePayload(payload));
 
   return new Promise<AppsScriptEnvelope<T>>((resolve, reject) => {
     let settled = false;
