@@ -15,30 +15,19 @@ function diagnosticBootstrap_(school, request) {
   var spreadsheet = diagnosticMeasure_(timings, 'abrirPlanilhaEVinculoMs', function () {
     return spreadsheetForSchool_(school);
   });
-  var configuration = diagnosticMeasure_(timings, 'lerConfiguracaoCompletaMs', function () {
-    return readConfiguration_(spreadsheet);
+  var configuration = diagnosticMeasure_(timings, 'lerConfiguracaoEssencialMs', function () {
+    return readPublicCoreConfiguration_(spreadsheet);
   });
   var preselectedLaboratoryId = optionalText_(request.preselectedLaboratoryId);
   var response = diagnosticMeasure_(timings, 'montarRespostaBootstrapMs', function () {
-    var activeLaboratories = configuration.laboratories
-      .filter(function (laboratory) {
-        return laboratory.active;
-      })
-      .map(function (laboratory) {
-        return {
-          id: laboratory.id,
-          name: laboratory.name,
-          active: laboratory.active,
-        };
-      });
     var data = {
       school: configuration.school,
-      laboratories: activeLaboratories,
+      laboratories: activePublicLaboratories_(configuration),
       periods: configuration.periods,
-      classGroups: configuration.classGroups,
-      subjects: configuration.subjects,
-      resources: configuration.resources,
-      bookingForm: configuration.bookingForm,
+      classGroups: [],
+      subjects: [],
+      resources: [],
+      bookingForm: { showObservations: false },
       configurationRevision: configuration.revision,
       sourceSpreadsheetFingerprint: spreadsheetBindingFingerprint_(spreadsheet),
     };
@@ -56,9 +45,9 @@ function diagnosticBootstrap_(school, request) {
     counts: {
       laboratories: response.laboratories.length,
       periods: response.periods.length,
-      subjects: response.subjects.length,
-      classGroups: response.classGroups.length,
-      resources: response.resources.length,
+      subjects: 0,
+      classGroups: 0,
+      resources: 0,
     },
     responseBytes: diagnosticPayloadBytes_(response),
   };
@@ -72,8 +61,8 @@ function diagnosticWeek_(school, request) {
   var spreadsheet = diagnosticMeasure_(timings, 'abrirPlanilhaEVinculoMs', function () {
     return spreadsheetForSchool_(school);
   });
-  var configuration = diagnosticMeasure_(timings, 'lerConfiguracaoCompletaMs', function () {
-    return readConfiguration_(spreadsheet);
+  var configuration = diagnosticMeasure_(timings, 'lerConfiguracaoEssencialMs', function () {
+    return readPublicCoreConfiguration_(spreadsheet);
   });
   var laboratory = diagnosticMeasure_(timings, 'localizarLaboratorioMs', function () {
     return activeLaboratory_(configuration, laboratoryId);
