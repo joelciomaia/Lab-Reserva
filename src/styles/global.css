@@ -142,6 +142,29 @@ a:hover {
   display: none;
 }
 
+/* No celular, cada campo complementar aparece imediatamente depois da seleção que o abriu. */
+@media (max-width: 47.999rem) {
+  [class*='identityFields'] > :has(input[name='teacherName']) {
+    order: 1;
+  }
+
+  [class*='identityFields'] > :has(select#subject) {
+    order: 2;
+  }
+
+  [class*='identityFields'] > :has(input[name='otherSubject']) {
+    order: 3;
+  }
+
+  [class*='identityFields'] > :has(select#class-group) {
+    order: 4;
+  }
+
+  [class*='identityFields'] > :has(input[name='otherClassGroup']) {
+    order: 5;
+  }
+}
+
 @media (min-width: 48rem) {
   [data-period-count] button[data-span] {
     gap: 0.0625rem;
