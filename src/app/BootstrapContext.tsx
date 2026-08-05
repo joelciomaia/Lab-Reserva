@@ -2,9 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useGoogleSheets } from '../integrations/google/GoogleSheetsProvider';
 import { backendClient } from '../services/backend';
-import { GoogleSheetsBackend } from '../services/googleSheetsBackend';
 import type { AppError, BackendClient, BootstrapData, BootstrapParams } from '../types';
 import { getFriendlyError } from '../types';
 import { getPublicAgendaContext, hasPublicAgendaContext } from './publicAgendaContext';
@@ -33,7 +31,6 @@ function normalizedPublicParameter(value: string | null | undefined): string | u
 
 export function BootstrapProvider({ children, client = backendClient }: BootstrapProviderProps) {
   const location = useLocation();
-  const { accessToken, spreadsheetId } = useGoogleSheets();
   const isManagerRoute = location.pathname.startsWith('/gerenciar');
   const explicitPublicContext = useMemo(
     () => getPublicAgendaContext(location.search, window.location.search),
@@ -47,15 +44,6 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
     location.pathname === '/agendar' ||
     (location.pathname === '/' && hasPublicAgendaContext(location.search, window.location.search));
   const [data, setData] = useState<BootstrapData | null>(null);
-  const resolvedClient = useMemo(() => {
-    if (client !== backendClient) {
-      return client;
-    }
-    if (accessToken && spreadsheetId) {
-      return new GoogleSheetsBackend(accessToken, spreadsheetId);
-    }
-    return client;
-  }, [accessToken, client, spreadsheetId]);
   const [error, setError] = useState<AppError | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -86,7 +74,7 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
         }
         setIsLoading(true);
         setError(null);
-        return resolvedClient.getBootstrapData(params);
+        return client.getBootstrapData(params);
       })
       .then((bootstrapData) => {
         if (isCurrentRequest && bootstrapData) {
@@ -108,7 +96,7 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
       isCurrentRequest = false;
     };
   }, [
-    resolvedClient,
+    client,
     isManagerRoute,
     preselectedLaboratoryId,
     publicSchoolId,
@@ -119,12 +107,12 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
   const value = useMemo(
     () => ({
       data: isManagerRoute || !shouldLoadPublicData ? null : data,
-      client: resolvedClient,
+      client,
       isLoading: isManagerRoute || !shouldLoadPublicData ? false : isLoading,
       error: isManagerRoute || !shouldLoadPublicData ? null : error,
       reload,
     }),
-    [data, error, isLoading, isManagerRoute, reload, resolvedClient, shouldLoadPublicData],
+    [client, data, error, isLoading, isManagerRoute, reload, shouldLoadPublicData],
   );
 
   return <BootstrapContext.Provider value={value}>{children}</BootstrapContext.Provider>;

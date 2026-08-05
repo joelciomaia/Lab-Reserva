@@ -80,7 +80,6 @@ export interface GoogleSheetsContextValue {
   authorize: (options?: GoogleAuthorizationOptions) => Promise<void>;
   connectPrivateGoogleChat: () => Promise<GooglePrivateChatConnection>;
   isAuthorized: boolean;
-  accessToken: string | null;
   status: GoogleSheetsStatus;
   loadLinkedConfiguration: () => Promise<AdminConfiguration | null>;
   syncConfiguration: (configuration: AdminConfiguration) => Promise<GoogleSheetsSyncResult>;
@@ -110,7 +109,6 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
   const accessTokenRef = useRef<string | null>(null);
   const tokenExpirationTimerRef = useRef<number | null>(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [status, setStatus] = useState<GoogleSheetsStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [spreadsheetId, setSpreadsheetId] = useState<string | null>(() => getStoredSpreadsheetId());
@@ -131,7 +129,6 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
     (authorization: GoogleAccessToken) => {
       clearTokenExpirationTimer();
       accessTokenRef.current = authorization.accessToken;
-      setAccessToken(authorization.accessToken);
       tokenExpirationTimerRef.current = window.setTimeout(() => {
         accessTokenRef.current = null;
         tokenExpirationTimerRef.current = null;
@@ -148,7 +145,6 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
   const forgetAccessToken = useCallback(() => {
     clearTokenExpirationTimer();
     accessTokenRef.current = null;
-    setAccessToken(null);
     setIsAuthorized(false);
     setPublicSchoolReady(false);
     setPublicSchoolError(null);
@@ -404,19 +400,8 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
           schoolId: configuration.school.id,
           revision: configuration.revision,
         });
-        try {
-          await provisionSchoolWorkspace({
-            accessToken,
-            spreadsheetId: result.spreadsheetId,
-            schoolId: configuration.school.id,
-            revision: configuration.revision,
-          });
-          setPublicSchoolReady(true);
-          setPublicSchoolError(null);
-        } catch {
-          setPublicSchoolReady(true);
-          setPublicSchoolError(null);
-        }
+        setPublicSchoolReady(true);
+        setPublicSchoolError(null);
         setStatus('authorized');
         return result;
       } catch (syncError: unknown) {
@@ -477,9 +462,15 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
           });
           setPublicSchoolReady(true);
           setPublicSchoolError(null);
-        } catch (publicationError: unknown) {
+        } catch (provisioningError: unknown) {
+          if (
+            provisioningError instanceof GoogleDriveIntegrationError &&
+            provisioningError.code === 'AUTHORIZATION_REQUIRED'
+          ) {
+            throw provisioningError;
+          }
           setPublicSchoolReady(false);
-          setPublicSchoolError(errorMessage(publicationError));
+          setPublicSchoolError(errorMessage(provisioningError));
         }
       } else {
         setPublicSchoolReady(false);
@@ -597,7 +588,6 @@ export function GoogleSheetsProvider({ children }: PropsWithChildren) {
       authorize,
       connectPrivateGoogleChat,
       isAuthorized,
-      accessToken,
       status,
       loadLinkedConfiguration,
       syncConfiguration,
