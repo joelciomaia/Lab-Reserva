@@ -2,7 +2,12 @@ import { Check, Plus, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button } from '../../components';
-import type { AvailabilityResponse, ClassPeriod } from '../../types';
+import type {
+  AvailabilityResponse,
+  ClassPeriod,
+  PeriodAvailability,
+  PeriodReservationSummary,
+} from '../../types';
 import { formatDatePtBr, formatIsoDate } from '../../utils/dates';
 import type { WeekDay } from '../../utils/week';
 import type { CalendarEventBlock } from './calendar';
@@ -48,6 +53,20 @@ function getCalendarDensity(periodCount: number): CalendarDensity {
   return 'dense';
 }
 
+function reservationSummaries(slot: PeriodAvailability | undefined): PeriodReservationSummary[] {
+  if (slot?.reservations?.length) {
+    return slot.reservations;
+  }
+
+  return slot?.reservation ? [slot.reservation] : [];
+}
+
+function eventAccessibleDetails(reservation: PeriodReservationSummary): string {
+  return [reservation.subject, reservation.teacherName, reservation.classGroup]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(', ');
+}
+
 export function WeeklyCalendar({
   days,
   periods,
@@ -75,7 +94,9 @@ export function WeeklyCalendar({
     [applicablePeriodIds, availability.length, periods],
   );
   const [selectedEvent, setSelectedEvent] = useState<SelectedEvent | null>(null);
+  const [fittedRowHeight, setFittedRowHeight] = useState<number | null>(null);
   const dialogTitleId = useId();
+  const viewportRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const lastFocusedElement = useRef<HTMLElement | null>(null);
@@ -91,7 +112,7 @@ export function WeeklyCalendar({
           availabilityByPeriod: new Map(
             dayAvailability?.periods.map((period) => [period.periodId, period]) ?? [],
           ),
-          eventByStartIndex: new Map(events.map((event) => [event.startIndex, event])),
+          events,
         };
       }),
     [availability, days, orderedPeriods],
@@ -114,6 +135,47 @@ export function WeeklyCalendar({
       orderedPeriods[periodIndex - 1]?.shiftId !== orderedPeriods[periodIndex]?.shiftId
     );
   }
+
+  useEffect(() => {
+    function updateFittedRowHeight() {
+      const viewport = viewportRef.current;
+      if (!viewport || orderedPeriods.length === 0) {
+        setFittedRowHeight(null);
+        return;
+      }
+
+      const viewportTop = viewport.getBoundingClientRect().top;
+      const availableHeight = Math.max(0, window.innerHeight - viewportTop - 12);
+      const headerHeight = 56;
+      const maximumByDensity: Record<CalendarDensity, number> = {
+        comfortable: 64,
+        regular: 60,
+        compact: 52,
+        dense: 48,
+      };
+      const minimumHeight = window.innerWidth >= 768 ? 32 : 28;
+      const calculatedHeight = Math.floor(
+        (availableHeight - headerHeight) / Math.max(orderedPeriods.length, 1),
+      );
+      const nextHeight = Math.max(
+        minimumHeight,
+        Math.min(maximumByDensity[density], calculatedHeight),
+      );
+
+      setFittedRowHeight((currentHeight) =>
+        currentHeight === nextHeight ? currentHeight : nextHeight,
+      );
+    }
+
+    updateFittedRowHeight();
+    const animationFrame = window.requestAnimationFrame(updateFittedRowHeight);
+    window.addEventListener('resize', updateFittedRowHeight);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener('resize', updateFittedRowHeight);
+    };
+  }, [density, orderedPeriods.length]);
 
   useEffect(() => {
     if (!selectedEvent) {
@@ -155,9 +217,15 @@ export function WeeklyCalendar({
     };
   }, [selectedEvent]);
 
+  const gridStyle = {
+    '--day-count': days.length,
+    ...(fittedRowHeight ? { '--period-row-height': `${fittedRowHeight}px` } : {}),
+  } as CSSProperties;
+
   return (
     <>
       <div
+        ref={viewportRef}
         className={styles.viewport}
         role="region"
         aria-label={`Agenda semanal de ${laboratoryName}`}
@@ -165,7 +233,7 @@ export function WeeklyCalendar({
       >
         <div
           className={styles.grid}
-          style={{ '--day-count': days.length } as CSSProperties}
+          style={gridStyle}
           data-density={density}
           data-period-count={orderedPeriods.length}
         >
@@ -213,9 +281,10 @@ export function WeeklyCalendar({
             );
           })}
 
-          {dayLayouts.flatMap(({ day, availabilityByPeriod }, dayIndex) => {
-            return orderedPeriods.map((period, periodIndex) => {
+          {dayLayouts.flatMap(({ day, availabilityByPeriod }, dayIndex) =>
+            orderedPeriods.map((period, periodIndex) => {
               const slot = availabilityByPeriod.get(period.id);
+              const reservations = reservationSummaries(slot);
               const isApplicable = slot !== undefined;
               const isPast = day.isoDate < today;
               const beginsLaterShift = periodIndex > 0 && startsShift(periodIndex);
@@ -223,7 +292,7 @@ export function WeeklyCalendar({
               return (
                 <div
                   className={`${styles.slotCell} ${
-                    slot?.status === 'UNAVAILABLE' ? styles.occupiedCell : ''
+                    reservations.length > 0 ? styles.occupiedCell : ''
                   } ${isApplicable ? '' : styles.notApplicableCell} ${
                     isPast ? styles.pastCell : ''
                   } ${beginsLaterShift ? styles.shiftBoundary : ''}`}
@@ -233,55 +302,74 @@ export function WeeklyCalendar({
                   aria-hidden="true"
                 />
               );
-            });
-          })}
+            }),
+          )}
 
           {orderedPeriods.flatMap((period, periodIndex) =>
-            dayLayouts.map(({ day, availabilityByPeriod, eventByStartIndex }, dayIndex) => {
+            dayLayouts.map(({ day, availabilityByPeriod }, dayIndex) => {
               const slot = availabilityByPeriod.get(period.id);
-              const event = eventByStartIndex.get(periodIndex);
-
-              if (slot?.status === 'AVAILABLE' && day.isoDate >= today) {
-                const accessibleLabel = `${day.name}, ${day.shortDate}, ${period.name}, ${period.startTime} às ${period.endTime}`;
-                return (
-                  <button
-                    className={styles.freeSlot}
-                    style={{ gridColumn: dayIndex + 2, gridRow: periodIndex + 2 }}
-                    type="button"
-                    aria-label={`${accessibleLabel}, livre. Fazer agendamento`}
-                    key={`action-${day.isoDate}-${period.id}`}
-                    onClick={() => onBookSlot(day.isoDate, period.id)}
-                  >
-                    <Plus className={styles.slotPlus} size={17} aria-hidden="true" />
-                    <span>Agendar</span>
-                  </button>
-                );
-              }
-
-              if (!event) {
+              if (slot?.status !== 'AVAILABLE' || day.isoDate < today) {
                 return null;
               }
 
+              const hasExistingReservations = reservationSummaries(slot).length > 0;
+              const accessibleLabel = `${day.name}, ${day.shortDate}, ${period.name}, ${period.startTime} às ${period.endTime}`;
+              return (
+                <button
+                  className={`${styles.freeSlot} ${
+                    hasExistingReservations ? styles.partialSlot : ''
+                  }`}
+                  style={{ gridColumn: dayIndex + 2, gridRow: periodIndex + 2 }}
+                  type="button"
+                  aria-label={`${accessibleLabel}, ${
+                    hasExistingReservations ? 'ainda possui vaga' : 'livre'
+                  }. Fazer agendamento`}
+                  key={`action-${day.isoDate}-${period.id}`}
+                  onClick={() => onBookSlot(day.isoDate, period.id)}
+                >
+                  <Plus className={styles.slotPlus} size={17} aria-hidden="true" />
+                  <span>{hasExistingReservations ? 'Outra turma' : 'Agendar'}</span>
+                </button>
+              );
+            }),
+          )}
+
+          {dayLayouts.flatMap(({ day, events }, dayIndex) =>
+            events.map((event) => {
               const { reservation } = event;
               const isNew = reservation.id === newReservationId;
+              const details = eventAccessibleDetails(reservation);
+              const laneWidth = 100 / Math.max(event.laneCount, 1);
+              const eventStyle = {
+                gridColumn: dayIndex + 2,
+                gridRow: `${event.startIndex + 2} / span ${event.rowSpan}`,
+                width: `calc(${laneWidth}% - 0.125rem)`,
+                marginInlineStart: `calc(${laneWidth * event.lane}% + 0.0625rem)`,
+              } as CSSProperties;
+
               return (
                 <button
                   className={`${styles.event} ${eventTone(reservation.id)} ${
                     isNew ? styles.newEvent : ''
                   }`}
-                  style={{
-                    gridColumn: dayIndex + 2,
-                    gridRow: `${event.startIndex + 2} / span ${event.rowSpan}`,
-                  }}
+                  style={eventStyle}
                   type="button"
                   data-span={event.rowSpan}
                   aria-haspopup="dialog"
-                  aria-label={`${day.name}, ${day.shortDate}, horário reservado, ${event.startTime} às ${event.endTime}. Ver detalhes`}
+                  aria-label={`${day.name}, ${day.shortDate}, horário reservado, ${event.startTime} às ${event.endTime}${
+                    details ? `, ${details}` : ''
+                  }. Ver detalhes`}
                   key={`${day.isoDate}-${reservation.id}-${event.startIndex}`}
                   onClick={() => openEvent(day, event)}
                 >
                   <strong>Reservado</strong>
-                  <span>Horário indisponível</span>
+                  <span title={reservation.subject}>{reservation.subject || 'Horário indisponível'}</span>
+                  {reservation.teacherName ? (
+                    <span title={reservation.teacherName}>{reservation.teacherName}</span>
+                  ) : null}
+                  {reservation.classGroup ? (
+                    <span title={reservation.classGroup}>{reservation.classGroup}</span>
+                  ) : null}
                   <small>
                     {event.startTime}–{event.endTime}
                   </small>
@@ -333,6 +421,24 @@ export function WeeklyCalendar({
                   {selectedEvent.event.startTime}–{selectedEvent.event.endTime}
                 </dd>
               </div>
+              {selectedEvent.event.reservation.subject ? (
+                <div>
+                  <dt>Disciplina</dt>
+                  <dd>{selectedEvent.event.reservation.subject}</dd>
+                </div>
+              ) : null}
+              {selectedEvent.event.reservation.teacherName ? (
+                <div>
+                  <dt>Professor</dt>
+                  <dd>{selectedEvent.event.reservation.teacherName}</dd>
+                </div>
+              ) : null}
+              {selectedEvent.event.reservation.classGroup ? (
+                <div>
+                  <dt>Turma</dt>
+                  <dd>{selectedEvent.event.reservation.classGroup}</dd>
+                </div>
+              ) : null}
             </dl>
             <Button variant="secondary" fullWidth onClick={closeEvent}>
               Fechar
