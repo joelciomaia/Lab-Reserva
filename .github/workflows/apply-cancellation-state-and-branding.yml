@@ -1,0 +1,556 @@
+name: Aplicar melhoria de cancelamentos e créditos
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-cancellation-state-and-branding.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Aplicar alterações
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, content):
+              Path(path).write_text(content, encoding='utf-8')
+
+          def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: esperado 1 trecho, encontrado {count}')
+              write(path, text.replace(old, new, 1))
+
+          # Novas colunas de estado atual na própria reserva.
+          support_header_old = """  'CRIADO_EM',
+            'AULAS_HORARIOS',
+          ];"""
+          support_header_new = """  'CRIADO_EM',
+            'AULAS_HORARIOS',
+            'STATUS',
+            'AULAS_CANCELADAS_IDS',
+            'CANCELADO_EM',
+            'CANCELADO_POR',
+            'MOTIVO_CANCELAMENTO',
+          ];"""
+          replace_once('apps-script/Support.gs', support_header_old, support_header_new)
+
+          sheets_header_old = """  'CRIADO_EM',
+            'AULAS_HORARIOS',
+          ];"""
+          sheets_header_new = """  'CRIADO_EM',
+            'AULAS_HORARIOS',
+            'STATUS',
+            'AULAS_CANCELADAS_IDS',
+            'CANCELADO_EM',
+            'CANCELADO_POR',
+            'MOTIVO_CANCELAMENTO',
+          ];"""
+          replace_once('src/integrations/google/googleSheets.ts', sheets_header_old, sheets_header_new)
+
+          # Leitura pública passa a usar apenas RESERVAS.
+          replace_once(
+              'apps-script/FastPublicData.gs',
+              """  return {
+            configuration: configuration,
+            laboratory: laboratory,
+            reservations: readReservations_(spreadsheet),
+            cancelled: cancellationSet_(readCancellations_(spreadsheet)),
+          };""",
+              """  return {
+            configuration: configuration,
+            laboratory: laboratory,
+            reservations: readReservations_(spreadsheet),
+          };""",
+          )
+
+          # RESERVAS aceita planilhas antigas e interpreta o estado atual diretamente na linha.
+          replace_once(
+              'apps-script/Reservations.gs',
+              "var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_);",
+              "var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_.slice(0, 14));",
+          )
+
+          reservation_push_old = """    reservations.push({
+            id: id,
+            date: sheetDateToIso_(tableCell_(table, row, 'DATA'), spreadsheet, location + ' (DATA)'),
+            laboratoryId: cellText_(tableCell_(table, row, 'LABORATORIO_ID')),
+            laboratoryName: cellText_(tableCell_(table, row, 'LABORATORIO_NOME')),
+            teacherName: cellText_(tableCell_(table, row, 'PROFESSOR')),
+            subject: cellText_(tableCell_(table, row, 'DISCIPLINA')),
+            classGroup: cellText_(tableCell_(table, row, 'TURMA')),
+            periodIds: periodIds,
+            periodLabels: splitList_(tableCell_(table, row, 'AULAS_NOMES')),
+            periodTimes: splitList_(tableCell_(table, row, 'AULAS_HORARIOS')),
+            knowledgeObjects: cellText_(tableCell_(table, row, 'OBJETOS_CONHECIMENTO')),
+            itemsUsed: cellText_(tableCell_(table, row, 'ITENS_UTILIZADOS')),
+            notes: cellText_(tableCell_(table, row, 'OBSERVACOES')),
+            createdAt: cellText_(tableCell_(table, row, 'CRIADO_EM')),
+          });"""
+          reservation_push_new = """    var storedStatus = cellText_(tableCell_(table, row, 'STATUS'));
+            var cancelledPeriodIds = splitList_(tableCell_(table, row, 'AULAS_CANCELADAS_IDS'));
+            var cancelledSeen = Object.create(null);
+            var validCancelledPeriodIds = [];
+            for (var cancelledIndex = 0; cancelledIndex < cancelledPeriodIds.length; cancelledIndex += 1) {
+              var cancelledPeriodId = cancelledPeriodIds[cancelledIndex];
+              if (!uniquePeriodIds[cancelledPeriodId]) {
+                throwApiError_(
+                  'DATA_INTEGRITY_ERROR',
+                  location + ' cancela uma aula que não pertence à reserva.',
+                );
+              }
+              if (!cancelledSeen[cancelledPeriodId]) {
+                cancelledSeen[cancelledPeriodId] = true;
+                validCancelledPeriodIds.push(cancelledPeriodId);
+              }
+            }
+            if (storedStatus === RESERVATION_STATUS_.CANCELLED && validCancelledPeriodIds.length === 0) {
+              validCancelledPeriodIds = periodIds.slice();
+            }
+            var status =
+              validCancelledPeriodIds.length === periodIds.length
+                ? RESERVATION_STATUS_.CANCELLED
+                : validCancelledPeriodIds.length > 0
+                  ? RESERVATION_STATUS_.PARTIALLY_CANCELLED
+                  : RESERVATION_STATUS_.CONFIRMED;
+
+            reservations.push({
+              id: id,
+              date: sheetDateToIso_(tableCell_(table, row, 'DATA'), spreadsheet, location + ' (DATA)'),
+              laboratoryId: cellText_(tableCell_(table, row, 'LABORATORIO_ID')),
+              laboratoryName: cellText_(tableCell_(table, row, 'LABORATORIO_NOME')),
+              teacherName: cellText_(tableCell_(table, row, 'PROFESSOR')),
+              subject: cellText_(tableCell_(table, row, 'DISCIPLINA')),
+              classGroup: cellText_(tableCell_(table, row, 'TURMA')),
+              periodIds: periodIds,
+              periodLabels: splitList_(tableCell_(table, row, 'AULAS_NOMES')),
+              periodTimes: splitList_(tableCell_(table, row, 'AULAS_HORARIOS')),
+              cancelledPeriodIds: validCancelledPeriodIds,
+              status: status,
+              knowledgeObjects: cellText_(tableCell_(table, row, 'OBJETOS_CONHECIMENTO')),
+              itemsUsed: cellText_(tableCell_(table, row, 'ITENS_UTILIZADOS')),
+              notes: cellText_(tableCell_(table, row, 'OBSERVACOES')),
+              createdAt: cellText_(tableCell_(table, row, 'CRIADO_EM')),
+            });"""
+          replace_once('apps-script/Reservations.gs', reservation_push_old, reservation_push_new)
+
+          entries_old = """function reservationEntries_(reservation, periods, cancelled) {
+            var entries = [];
+            for (var index = 0; index < reservation.periodIds.length; index += 1) {
+              var periodId = reservation.periodIds[index];
+              if (cancelled[cancellationKey_(reservation.id, periodId)]) continue;"""
+          entries_new = """function reservationEntries_(reservation, periods) {
+            var entries = [];
+            if (reservation.status === RESERVATION_STATUS_.CANCELLED) {
+              return entries;
+            }
+            var cancelledPeriodIds = Object.create(null);
+            for (var cancelledIndex = 0; cancelledIndex < reservation.cancelledPeriodIds.length; cancelledIndex += 1) {
+              cancelledPeriodIds[reservation.cancelledPeriodIds[cancelledIndex]] = true;
+            }
+            for (var index = 0; index < reservation.periodIds.length; index += 1) {
+              var periodId = reservation.periodIds[index];
+              if (cancelledPeriodIds[periodId]) continue;"""
+          replace_once('apps-script/Reservations.gs', entries_old, entries_new)
+
+          replace_once(
+              'apps-script/Reservations.gs',
+              'function occupyingReservations_(reservations, cancelled, periods, laboratoryId, date, period) {',
+              'function occupyingReservations_(reservations, periods, laboratoryId, date, period) {',
+          )
+          replace_once(
+              'apps-script/Reservations.gs',
+              '    var entries = reservationEntries_(reservation, periods, cancelled);',
+              '    var entries = reservationEntries_(reservation, periods);',
+          )
+
+          # Remove o conjunto de cancelamentos dos contextos e das chamadas.
+          reservations_text = read('apps-script/Reservations.gs')
+          reservations_text = reservations_text.replace(
+              "    cancelled: cancellationSet_(readCancellations_(spreadsheet)),\n",
+              '',
+          )
+          reservations_text = reservations_text.replace('      context.cancelled,\n', '')
+          reservations_text = reservations_text.replace(
+              "    var cancelled = cancellationSet_(readCancellations_(spreadsheet));\n",
+              '',
+          )
+          reservations_text = reservations_text.replace('        cancelled,\n', '')
+          write('apps-script/Reservations.gs', reservations_text)
+
+          replace_once(
+              'apps-script/Reservations.gs',
+              "    var sheet = spreadsheet.getSheetByName(RESERVATIONS_SHEET_NAME_);",
+              "    var sheet = ensureAppendOnlySheet_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_, 14);",
+          )
+          replace_once(
+              'apps-script/Reservations.gs',
+              """      reservation.createdAt,
+            serializeList_(reservation.periodTimes),
+          ]);""",
+              """      reservation.createdAt,
+            serializeList_(reservation.periodTimes),
+            reservation.status,
+            '',
+            '',
+            '',
+            '',
+          ]);""",
+          )
+
+          # Diagnóstico acompanha o caminho real, sem abrir CANCELAMENTOS.
+          diagnostics = read('apps-script/Diagnostics.gs')
+          diagnostics = diagnostics.replace(
+              """  var cancellations = diagnosticMeasure_(timings, 'lerCancelamentosMs', function () {
+            return readCancellations_(spreadsheet);
+          });
+            var cancelled = diagnosticMeasure_(timings, 'processarCancelamentosMs', function () {
+            return cancellationSet_(cancellations);
+          });
+          """,
+              '',
+          )
+          diagnostics = diagnostics.replace(
+              """    reservations: reservations,
+            cancelled: cancelled,
+          };""",
+              """    reservations: reservations,
+          };""",
+          )
+          diagnostics = diagnostics.replace(
+              """      reservations: reservations.length,
+            cancellations: cancellations.length,
+          },""",
+              """      reservations: reservations.length,
+            cancelledReservations: reservations.filter(function (reservation) {
+              return reservation.status !== RESERVATION_STATUS_.CONFIRMED;
+            }).length,
+          },""",
+          )
+          write('apps-script/Diagnostics.gs', diagnostics)
+
+          # Integração administrativa: mantém auditoria e atualiza a linha da reserva na mesma operação.
+          replace_once(
+              'src/integrations/google/googleReservations.ts',
+              """  createdAt: string;
+          }""",
+              """  createdAt: string;
+            storedStatus: GoogleReservationStatus;
+            storedCancelledPeriodIds: string[];
+            lastCancelledAt: string;
+            lastCancelledBy: string;
+            lastCancellationReason: string;
+          }""",
+          )
+
+          replace_once(
+              'src/integrations/google/googleReservations.ts',
+              """        createdAt: getCell(row, headerIndex, 'CRIADO_EM'),
+              },""",
+              """        createdAt: getCell(row, headerIndex, 'CRIADO_EM'),
+                storedStatus:
+                  (getCell(row, headerIndex, 'STATUS') as GoogleReservationStatus) || 'CONFIRMED',
+                storedCancelledPeriodIds: unique(
+                  parseListCell(getCell(row, headerIndex, 'AULAS_CANCELADAS_IDS')),
+                ),
+                lastCancelledAt: getCell(row, headerIndex, 'CANCELADO_EM'),
+                lastCancelledBy: getCell(row, headerIndex, 'CANCELADO_POR'),
+                lastCancellationReason: getCell(row, headerIndex, 'MOTIVO_CANCELAMENTO'),
+              },""",
+          )
+
+          derive_old = """  const cancelledSet = new Set(cancellations.map((cancellation) => cancellation.periodId));
+            const cancelledPeriodIds = reservation.periodIds.filter((periodId) => cancelledSet.has(periodId));"""
+          derive_new = """  const cancelledSet = new Set([
+            ...reservation.storedCancelledPeriodIds,
+            ...cancellations.map((cancellation) => cancellation.periodId),
+          ]);
+            if (reservation.storedStatus === 'CANCELLED' && cancelledSet.size === 0) {
+              reservation.periodIds.forEach((periodId) => cancelledSet.add(periodId));
+            }
+            const cancelledPeriodIds = reservation.periodIds.filter((periodId) => cancelledSet.has(periodId));"""
+          replace_once('src/integrations/google/googleReservations.ts', derive_old, derive_new)
+
+          replace_once(
+              'src/integrations/google/googleReservations.ts',
+              """    createdAt: reservation.createdAt,
+            };""",
+              """    createdAt: reservation.createdAt,
+              storedStatus: reservation.status,
+              storedCancelledPeriodIds: reservation.cancelledPeriodIds,
+              lastCancelledAt: reservation.cancellations.at(-1)?.cancelledAt ?? '',
+              lastCancelledBy: reservation.cancellations.at(-1)?.cancelledBy ?? '',
+              lastCancellationReason: reservation.cancellations.at(-1)?.reason ?? '',
+            };""",
+          )
+
+          cancel_load_old = """  const reservations = await listReservations(normalizedOptions);
+            const reservation = reservations.find((candidate) => candidate.id === reservationId);"""
+          cancel_load_new = """  const schema = await ensureSchema(normalizedOptions);
+            const values = await requestGoogleApi<BatchGetValuesResponse>(
+              normalizedOptions,
+              batchGetUrl(normalizedOptions.spreadsheetId, [
+                `${quoteSheetTitle(GOOGLE_RESERVATIONS_SHEET_TITLE)}!A:ZZ`,
+                `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A:ZZ`,
+              ]),
+            );
+            const reservationValues = values.valueRanges?.[0]?.values ?? [];
+            const cancellationValues = values.valueRanges?.[1]?.values ?? [];
+            const reservations = parseGoogleReservations(reservationValues, cancellationValues);
+            const reservation = reservations.find((candidate) => candidate.id === reservationId);"""
+          replace_once('src/integrations/google/googleReservations.ts', cancel_load_old, cancel_load_new)
+
+          append_old = """  const appendRange = `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A:J`;
+            const params = new URLSearchParams({
+              valueInputOption: 'RAW',
+              insertDataOption: 'INSERT_ROWS',
+            });
+            await requestGoogleApi<unknown>(
+              normalizedOptions,
+              `${GOOGLE_SHEETS_API_URL}/${encodeURIComponent(normalizedOptions.spreadsheetId)}/values/${encodeURIComponent(appendRange)}:append?${params.toString()}`,
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  majorDimension: 'ROWS',
+                  values: appendedCancellations.map((cancellation) => [
+                    cancellation.id,
+                    cancellation.reservationId,
+                    cancellation.periodId,
+                    cancellation.periodLabel,
+                    cancellation.periodTime,
+                    cancellation.date,
+                    cancellation.laboratoryId,
+                    cancellation.cancelledAt,
+                    cancellation.cancelledBy,
+                    cancellation.reason,
+                  ]),
+                }),
+              },
+            );
+
+            return {
+              reservation: createUpdatedReservation(reservation, appendedCancellations),
+              appendedCancellations,
+            };"""
+          append_new = """  const reservationHeader = reservationValues[0] ?? schema.reservationsHeader;
+            const reservationHeaderIndex = createHeaderIndex(
+              reservationHeader,
+              GOOGLE_RESERVATIONS_SHEET_TITLE,
+            );
+            const reservationRowIndex = reservationValues.slice(1).findIndex(
+              (row) => getCell(row, reservationHeaderIndex, 'ID') === reservation.id,
+            );
+            if (reservationRowIndex < 0) {
+              throw new GoogleReservationsIntegrationError(
+                'RESERVATION_NOT_FOUND',
+                'O agendamento não foi encontrado na planilha.',
+              );
+            }
+            const reservationRowNumber = reservationRowIndex + 2;
+            const updatedCancelledPeriodIds = unique([
+              ...reservation.cancelledPeriodIds,
+              ...periodIdsToAppend,
+            ]);
+            const updatedStatus: GoogleReservationStatus =
+              updatedCancelledPeriodIds.length === reservation.periodIds.length
+                ? 'CANCELLED'
+                : 'PARTIALLY_CANCELLED';
+            const stateValues: Readonly<Record<string, string>> = {
+              STATUS: updatedStatus,
+              AULAS_CANCELADAS_IDS: JSON.stringify(updatedCancelledPeriodIds),
+              CANCELADO_EM: cancelledAt,
+              CANCELADO_POR: cancelledBy,
+              MOTIVO_CANCELAMENTO: reason,
+            };
+            const updateData = Object.entries(stateValues).map(([headerName, value]) => {
+              const columnIndex = reservationHeaderIndex.get(normalizeHeader(headerName));
+              if (columnIndex === undefined) {
+                throw new GoogleReservationsIntegrationError(
+                  'INVALID_SCHEMA',
+                  `A aba ${GOOGLE_RESERVATIONS_SHEET_TITLE} não possui a coluna ${headerName}.`,
+                );
+              }
+              return {
+                range: `${quoteSheetTitle(GOOGLE_RESERVATIONS_SHEET_TITLE)}!${columnName(columnIndex + 1)}${reservationRowNumber}`,
+                majorDimension: 'ROWS',
+                values: [[value]],
+              };
+            });
+            const firstCancellationRow = Math.max(2, cancellationValues.length + 1);
+            const lastCancellationRow = firstCancellationRow + appendedCancellations.length - 1;
+            updateData.push({
+              range: `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A${firstCancellationRow}:J${lastCancellationRow}`,
+              majorDimension: 'ROWS',
+              values: appendedCancellations.map((cancellation) => [
+                cancellation.id,
+                cancellation.reservationId,
+                cancellation.periodId,
+                cancellation.periodLabel,
+                cancellation.periodTime,
+                cancellation.date,
+                cancellation.laboratoryId,
+                cancellation.cancelledAt,
+                cancellation.cancelledBy,
+                cancellation.reason,
+              ]),
+            });
+            await requestGoogleApi<unknown>(
+              normalizedOptions,
+              `${GOOGLE_SHEETS_API_URL}/${encodeURIComponent(normalizedOptions.spreadsheetId)}/values:batchUpdate`,
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  valueInputOption: 'RAW',
+                  data: updateData,
+                }),
+              },
+            );
+
+            return {
+              reservation: createUpdatedReservation(reservation, appendedCancellations),
+              appendedCancellations,
+            };"""
+          replace_once('src/integrations/google/googleReservations.ts', append_old, append_new)
+
+          # Crédito do desenvolvedor na página inicial.
+          replace_once(
+              'src/pages/LandingPage.tsx',
+              """    description: 'Reservas e cancelamentos ficam registrados sem apagar as linhas originais.',""",
+              """    description:
+              'O estado atual fica na reserva e cada cancelamento continua registrado para auditoria.',""",
+          )
+          replace_once(
+              'src/pages/LandingPage.tsx',
+              """        <span>Feito para simplificar a rotina escolar.</span>
+              </footer>""",
+              """        <div className={styles.footerCredits}>
+                  <span>Feito para simplificar a rotina escolar.</span>
+                  <span>
+                    © 2026 Lab Reserva · Desenvolvido por Joelcio Maia ·{' '}
+                    <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
+                      Portfólio do desenvolvedor
+                    </a>
+                  </span>
+                </div>
+              </footer>""",
+          )
+
+          landing_css = read('src/pages/LandingPage.module.css')
+          landing_css += """
+
+          .footerCredits {
+            display: grid;
+            justify-items: end;
+            gap: 0.35rem;
+            text-align: end;
+          }
+
+          .footerCredits a {
+            color: var(--landing-blue);
+            font-weight: 750;
+            text-decoration: none;
+          }
+
+          .footerCredits a:hover {
+            text-decoration: underline;
+          }
+
+          @media (max-width: 48rem) {
+            .footerCredits {
+              justify-items: start;
+              text-align: start;
+            }
+          }
+          """
+          write('src/pages/LandingPage.module.css', landing_css)
+
+          # Crédito no rodapé da agenda semanal.
+          replace_once(
+              'src/pages/WeeklySchedulePage.tsx',
+              """      </section>
+            </div>
+          );""",
+              """      </section>
+
+                <footer className={styles.developerFooter}>
+                  <span>© 2026 Lab Reserva · Desenvolvido por Joelcio Maia</span>
+                  <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
+                    Portfólio do desenvolvedor
+                  </a>
+                </footer>
+              </div>
+            );""",
+          )
+
+          weekly_css = read('src/pages/WeeklySchedulePage.module.css')
+          weekly_css += """
+
+          .developerFooter {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.35rem 0.65rem;
+            padding-block: var(--space-5) var(--space-2);
+            margin-top: var(--space-5);
+            color: var(--color-text-muted);
+            border-top: 1px solid var(--color-border);
+            font-size: var(--font-size-xs);
+            text-align: center;
+          }
+
+          .developerFooter a {
+            color: var(--color-brand-700);
+            font-weight: 700;
+            text-decoration: none;
+          }
+
+          .developerFooter a:hover {
+            text-decoration: underline;
+          }
+          """
+          write('src/pages/WeeklySchedulePage.module.css', weekly_css)
+
+          # Favicon com relógio.
+          replace_once(
+              'index.html',
+              """    <link
+              rel="icon"
+              href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23174a6e'/%3E%3Cpath d='M24 14h16M28 14v13L18 46a4 4 0 0 0 3 6h22a4 4 0 0 0 3-6L36 27V14' fill='none' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E"
+            />""",
+              """    <link
+              rel="icon"
+              href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23174a6e'/%3E%3Ccircle cx='32' cy='32' r='19' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M32 20v13l9 6' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='2.5' fill='white'/%3E%3C/svg%3E"
+            />""",
+          )
+          PY
+
+      - run: npm ci
+      - run: npm run test:run
+      - run: npm run build
+      - run: npm run lint
+
+      - name: Publicar alterações
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps-script src index.html
+          git commit -m "Otimiza cancelamentos e adiciona créditos"
+          git push
