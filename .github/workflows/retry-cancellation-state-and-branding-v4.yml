@@ -1,0 +1,62 @@
+name: Finalizar melhoria de cancelamentos e créditos
+
+on:
+  push:
+    paths:
+      - .github/workflows/retry-cancellation-state-and-branding-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Aplicar alterações
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          workflow = Path('.github/workflows/retry-cancellation-state-and-branding-v3.yml').read_text(encoding='utf-8')
+          start_marker = "          python <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          source = dedent(workflow[start:end])
+          exec(compile(source, 'retry-cancellation-state-and-branding-v3', 'exec'))
+
+          path = Path('src/integrations/google/googleReservations.ts')
+          text = path.read_text(encoding='utf-8')
+          old = """export const GOOGLE_RESERVATIONS_HEADER = [
+            ...RESERVATIONS_HEADER.filter((header) => header !== 'AULAS_HORARIOS'),
+            'AULAS_HORARIOS',
+          ] as const;"""
+          new = "export const GOOGLE_RESERVATIONS_HEADER = [...RESERVATIONS_HEADER] as const;"
+          if text.count(old) != 1:
+              raise RuntimeError('Cabeçalho de reservas não encontrado para normalização.')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - run: npm ci
+      - name: Testar cancelamentos
+        run: npx vitest run src/integrations/google/googleReservations.test.ts
+      - run: npm run build
+      - run: npm run lint
+
+      - name: Publicar alterações
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps-script src index.html
+          git commit -m "Otimiza cancelamentos e adiciona créditos"
+          git push
