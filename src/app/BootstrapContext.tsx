@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { PropsWithChildren } from 'react';
 import { useLocation } from 'react-router-dom';
 import { backendClient } from '../services/backend';
+import { loadBookingOptions } from '../services/bookingOptionsLoader';
 import type { AppError, BackendClient, BootstrapData, BootstrapParams } from '../types';
 import { getFriendlyError } from '../types';
 import { getPublicAgendaContext, hasPublicAgendaContext } from './publicAgendaContext';
@@ -32,6 +33,7 @@ function normalizedPublicParameter(value: string | null | undefined): string | u
 export function BootstrapProvider({ children, client = backendClient }: BootstrapProviderProps) {
   const location = useLocation();
   const isManagerRoute = location.pathname.startsWith('/gerenciar');
+  const isBookingRoute = location.pathname === '/agendar';
   const explicitPublicContext = useMemo(
     () => getPublicAgendaContext(location.search, window.location.search),
     [location.search],
@@ -45,12 +47,14 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
     (location.pathname === '/' && hasPublicAgendaContext(location.search, window.location.search));
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<AppError | null>(null);
+  const [bookingOptionsError, setBookingOptionsError] = useState<AppError | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   const reload = useCallback(() => {
     setIsLoading(true);
     setError(null);
+    setBookingOptionsError(null);
     setRequestVersion((current) => current + 1);
   }, []);
 
@@ -65,8 +69,8 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
       ...(preselectedLaboratoryId ? { preselectedLaboratoryId } : {}),
     };
 
-    // A fila assíncrona evita atualizações síncronas de estado dentro do efeito
-    // e também impede que uma rota administrativa dispare o bootstrap público.
+    // A agenda principal recebe primeiro apenas escola, laboratórios e horários.
+    // Disciplinas, turmas e recursos são lidos em segundo plano, sem bloquear a tela.
     void Promise.resolve()
       .then(() => {
         if (!isCurrentRequest) {
@@ -74,12 +78,34 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
         }
         setIsLoading(true);
         setError(null);
+        setBookingOptionsError(null);
         return client.getBootstrapData(params);
       })
       .then((bootstrapData) => {
-        if (isCurrentRequest && bootstrapData) {
-          setData(bootstrapData);
+        if (!isCurrentRequest || !bootstrapData) {
+          return;
         }
+
+        setData(bootstrapData);
+        setIsLoading(false);
+
+        void loadBookingOptions(bootstrapData.school.id)
+          .then((options) => {
+            if (!isCurrentRequest) {
+              return;
+            }
+            setBookingOptionsError(null);
+            setData((currentData) =>
+              currentData && currentData.school.id === bootstrapData.school.id
+                ? { ...currentData, ...options }
+                : currentData,
+            );
+          })
+          .catch((requestError: unknown) => {
+            if (isCurrentRequest) {
+              setBookingOptionsError(getFriendlyError(requestError));
+            }
+          });
       })
       .catch((requestError: unknown) => {
         if (isCurrentRequest) {
@@ -109,10 +135,23 @@ export function BootstrapProvider({ children, client = backendClient }: Bootstra
       data: isManagerRoute || !shouldLoadPublicData ? null : data,
       client,
       isLoading: isManagerRoute || !shouldLoadPublicData ? false : isLoading,
-      error: isManagerRoute || !shouldLoadPublicData ? null : error,
+      error:
+        isManagerRoute || !shouldLoadPublicData
+          ? null
+          : error ?? (isBookingRoute ? bookingOptionsError : null),
       reload,
     }),
-    [client, data, error, isLoading, isManagerRoute, reload, shouldLoadPublicData],
+    [
+      bookingOptionsError,
+      client,
+      data,
+      error,
+      isBookingRoute,
+      isLoading,
+      isManagerRoute,
+      reload,
+      shouldLoadPublicData,
+    ],
   );
 
   return <BootstrapContext.Provider value={value}>{children}</BootstrapContext.Provider>;
