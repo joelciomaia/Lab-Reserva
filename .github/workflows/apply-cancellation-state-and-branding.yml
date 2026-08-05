@@ -24,6 +24,7 @@ jobs:
         run: |
           python <<'PY'
           from pathlib import Path
+          import re
 
           def read(path):
               return Path(path).read_text(encoding='utf-8')
@@ -31,31 +32,27 @@ jobs:
           def write(path, content):
               Path(path).write_text(content, encoding='utf-8')
 
-          def replace_once(path, old, new):
+          def replace_regex(path, pattern, replacement, flags=0):
               text = read(path)
-              count = text.count(old)
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
               if count != 1:
-                  raise RuntimeError(f'{path}: esperado 1 trecho, encontrado {count}')
-              write(path, text.replace(old, new, 1))
+                  raise RuntimeError(f'{path}: padrão não encontrado: {pattern[:80]}')
+              write(path, updated)
 
-          # Novas colunas de estado atual na própria reserva.
-          support_header_old = """  'CRIADO_EM',
-            'AULAS_HORARIOS',
-          ];"""
-          support_header_new = """  'CRIADO_EM',
-            'AULAS_HORARIOS',
-            'STATUS',
-            'AULAS_CANCELADAS_IDS',
-            'CANCELADO_EM',
-            'CANCELADO_POR',
-            'MOTIVO_CANCELAMENTO',
-          ];"""
-          replace_once('apps-script/Support.gs', support_header_old, support_header_new)
-
-          sheets_header_old = """  'CRIADO_EM',
-            'AULAS_HORARIOS',
-          ];"""
-          sheets_header_new = """  'CRIADO_EM',
+          reservation_headers = """var RESERVATIONS_HEADER_ = [
+            'ID',
+            'DATA',
+            'LABORATORIO_ID',
+            'LABORATORIO_NOME',
+            'PROFESSOR',
+            'DISCIPLINA',
+            'TURMA',
+            'AULAS_IDS',
+            'AULAS_NOMES',
+            'OBJETOS_CONHECIMENTO',
+            'ITENS_UTILIZADOS',
+            'OBSERVACOES',
+            'CRIADO_EM',
             'AULAS_HORARIOS',
             'STATUS',
             'AULAS_CANCELADAS_IDS',
@@ -63,53 +60,38 @@ jobs:
             'CANCELADO_POR',
             'MOTIVO_CANCELAMENTO',
           ];"""
-          replace_once('src/integrations/google/googleSheets.ts', sheets_header_old, sheets_header_new)
+          replace_regex('apps-script/Support.gs', r"var RESERVATIONS_HEADER_ = \[.*?\];", reservation_headers, re.S)
 
-          # Leitura pública passa a usar apenas RESERVAS.
-          replace_once(
-              'apps-script/FastPublicData.gs',
-              """  return {
-            configuration: configuration,
-            laboratory: laboratory,
-            reservations: readReservations_(spreadsheet),
-            cancelled: cancellationSet_(readCancellations_(spreadsheet)),
-          };""",
-              """  return {
-            configuration: configuration,
-            laboratory: laboratory,
-            reservations: readReservations_(spreadsheet),
-          };""",
+          ts_headers = reservation_headers.replace('var RESERVATIONS_HEADER_', 'export const RESERVATIONS_HEADER: readonly string[]')
+          replace_regex(
+              'src/integrations/google/googleSheets.ts',
+              r"export const RESERVATIONS_HEADER: readonly string\[\] = \[.*?\];",
+              ts_headers,
+              re.S,
           )
 
-          # RESERVAS aceita planilhas antigas e interpreta o estado atual diretamente na linha.
-          replace_once(
-              'apps-script/Reservations.gs',
-              "var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_);",
-              "var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_.slice(0, 14));",
-          )
+          fast = read('apps-script/FastPublicData.gs')
+          target = "    cancelled: cancellationSet_(readCancellations_(spreadsheet)),\n"
+          if fast.count(target) != 1:
+              raise RuntimeError('FastPublicData.gs: leitura de cancelamentos não encontrada')
+          write('apps-script/FastPublicData.gs', fast.replace(target, '', 1))
 
-          reservation_push_old = """    reservations.push({
-            id: id,
-            date: sheetDateToIso_(tableCell_(table, row, 'DATA'), spreadsheet, location + ' (DATA)'),
-            laboratoryId: cellText_(tableCell_(table, row, 'LABORATORIO_ID')),
-            laboratoryName: cellText_(tableCell_(table, row, 'LABORATORIO_NOME')),
-            teacherName: cellText_(tableCell_(table, row, 'PROFESSOR')),
-            subject: cellText_(tableCell_(table, row, 'DISCIPLINA')),
-            classGroup: cellText_(tableCell_(table, row, 'TURMA')),
-            periodIds: periodIds,
-            periodLabels: splitList_(tableCell_(table, row, 'AULAS_NOMES')),
-            periodTimes: splitList_(tableCell_(table, row, 'AULAS_HORARIOS')),
-            knowledgeObjects: cellText_(tableCell_(table, row, 'OBJETOS_CONHECIMENTO')),
-            itemsUsed: cellText_(tableCell_(table, row, 'ITENS_UTILIZADOS')),
-            notes: cellText_(tableCell_(table, row, 'OBSERVACOES')),
-            createdAt: cellText_(tableCell_(table, row, 'CRIADO_EM')),
-          });"""
-          reservation_push_new = """    var storedStatus = cellText_(tableCell_(table, row, 'STATUS'));
-            var cancelledPeriodIds = splitList_(tableCell_(table, row, 'AULAS_CANCELADAS_IDS'));
+          reservations = read('apps-script/Reservations.gs')
+          old = 'var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_);'
+          if reservations.count(old) != 1:
+              raise RuntimeError('Reservations.gs: leitura da aba não encontrada')
+          reservations = reservations.replace(
+              old,
+              'var table = readTable_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_.slice(0, 13));',
+              1,
+          )
+          marker = '    reservations.push({\n'
+          state_block = """    var storedStatus = cellText_(tableCell_(table, row, 'STATUS'));
+            var rawCancelledPeriodIds = splitList_(tableCell_(table, row, 'AULAS_CANCELADAS_IDS'));
             var cancelledSeen = Object.create(null);
-            var validCancelledPeriodIds = [];
-            for (var cancelledIndex = 0; cancelledIndex < cancelledPeriodIds.length; cancelledIndex += 1) {
-              var cancelledPeriodId = cancelledPeriodIds[cancelledIndex];
+            var cancelledPeriodIds = [];
+            for (var cancelledIndex = 0; cancelledIndex < rawCancelledPeriodIds.length; cancelledIndex += 1) {
+              var cancelledPeriodId = rawCancelledPeriodIds[cancelledIndex];
               if (!uniquePeriodIds[cancelledPeriodId]) {
                 throwApiError_(
                   'DATA_INTEGRITY_ERROR',
@@ -118,45 +100,39 @@ jobs:
               }
               if (!cancelledSeen[cancelledPeriodId]) {
                 cancelledSeen[cancelledPeriodId] = true;
-                validCancelledPeriodIds.push(cancelledPeriodId);
+                cancelledPeriodIds.push(cancelledPeriodId);
               }
             }
-            if (storedStatus === RESERVATION_STATUS_.CANCELLED && validCancelledPeriodIds.length === 0) {
-              validCancelledPeriodIds = periodIds.slice();
+            if (storedStatus === RESERVATION_STATUS_.CANCELLED && cancelledPeriodIds.length === 0) {
+              cancelledPeriodIds = periodIds.slice();
             }
             var status =
-              validCancelledPeriodIds.length === periodIds.length
+              cancelledPeriodIds.length === periodIds.length
                 ? RESERVATION_STATUS_.CANCELLED
-                : validCancelledPeriodIds.length > 0
+                : cancelledPeriodIds.length > 0
                   ? RESERVATION_STATUS_.PARTIALLY_CANCELLED
                   : RESERVATION_STATUS_.CONFIRMED;
 
-            reservations.push({
-              id: id,
-              date: sheetDateToIso_(tableCell_(table, row, 'DATA'), spreadsheet, location + ' (DATA)'),
-              laboratoryId: cellText_(tableCell_(table, row, 'LABORATORIO_ID')),
-              laboratoryName: cellText_(tableCell_(table, row, 'LABORATORIO_NOME')),
-              teacherName: cellText_(tableCell_(table, row, 'PROFESSOR')),
-              subject: cellText_(tableCell_(table, row, 'DISCIPLINA')),
-              classGroup: cellText_(tableCell_(table, row, 'TURMA')),
-              periodIds: periodIds,
-              periodLabels: splitList_(tableCell_(table, row, 'AULAS_NOMES')),
-              periodTimes: splitList_(tableCell_(table, row, 'AULAS_HORARIOS')),
-              cancelledPeriodIds: validCancelledPeriodIds,
-              status: status,
-              knowledgeObjects: cellText_(tableCell_(table, row, 'OBJETOS_CONHECIMENTO')),
-              itemsUsed: cellText_(tableCell_(table, row, 'ITENS_UTILIZADOS')),
-              notes: cellText_(tableCell_(table, row, 'OBSERVACOES')),
-              createdAt: cellText_(tableCell_(table, row, 'CRIADO_EM')),
-            });"""
-          replace_once('apps-script/Reservations.gs', reservation_push_old, reservation_push_new)
-
-          entries_old = """function reservationEntries_(reservation, periods, cancelled) {
-            var entries = [];
-            for (var index = 0; index < reservation.periodIds.length; index += 1) {
-              var periodId = reservation.periodIds[index];
-              if (cancelled[cancellationKey_(reservation.id, periodId)]) continue;"""
-          entries_new = """function reservationEntries_(reservation, periods) {
+          """
+          if reservations.count(marker) != 1:
+              raise RuntimeError('Reservations.gs: ponto da reserva não encontrado')
+          reservations = reservations.replace(marker, state_block + marker, 1)
+          old = "      periodTimes: splitList_(tableCell_(table, row, 'AULAS_HORARIOS')),\n"
+          if reservations.count(old) != 1:
+              raise RuntimeError('Reservations.gs: horários não encontrados')
+          reservations = reservations.replace(
+              old,
+              old + '      cancelledPeriodIds: cancelledPeriodIds,\n      status: status,\n',
+              1,
+          )
+          pattern = re.compile(
+              r"function reservationEntries_\(reservation, periods, cancelled\) \{\n"
+              r"  var entries = \[\];\n"
+              r"  for \(var index = 0; index < reservation\.periodIds\.length; index \+= 1\) \{\n"
+              r"    var periodId = reservation\.periodIds\[index\];\n"
+              r"    if \(cancelled\[cancellationKey_\(reservation\.id, periodId\)\]\) continue;"
+          )
+          replacement = """function reservationEntries_(reservation, periods) {
             var entries = [];
             if (reservation.status === RESERVATION_STATUS_.CANCELLED) {
               return entries;
@@ -168,142 +144,82 @@ jobs:
             for (var index = 0; index < reservation.periodIds.length; index += 1) {
               var periodId = reservation.periodIds[index];
               if (cancelledPeriodIds[periodId]) continue;"""
-          replace_once('apps-script/Reservations.gs', entries_old, entries_new)
-
-          replace_once(
-              'apps-script/Reservations.gs',
+          reservations, count = pattern.subn(replacement, reservations, count=1)
+          if count != 1:
+              raise RuntimeError('Reservations.gs: reservationEntries não encontrada')
+          reservations = reservations.replace(
               'function occupyingReservations_(reservations, cancelled, periods, laboratoryId, date, period) {',
               'function occupyingReservations_(reservations, periods, laboratoryId, date, period) {',
+              1,
           )
-          replace_once(
-              'apps-script/Reservations.gs',
+          reservations = reservations.replace(
               '    var entries = reservationEntries_(reservation, periods, cancelled);',
               '    var entries = reservationEntries_(reservation, periods);',
+              1,
           )
+          reservations = reservations.replace('    cancelled: cancellationSet_(readCancellations_(spreadsheet)),\n', '')
+          reservations = reservations.replace('      context.cancelled,\n', '')
+          reservations = reservations.replace('    var cancelled = cancellationSet_(readCancellations_(spreadsheet));\n', '')
+          reservations = reservations.replace('        cancelled,\n', '')
+          reservations = reservations.replace(
+              '    var sheet = spreadsheet.getSheetByName(RESERVATIONS_SHEET_NAME_);',
+              '    var sheet = ensureAppendOnlySheet_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_, 13);',
+              1,
+          )
+          append_marker = '      serializeList_(reservation.periodTimes),\n'
+          if reservations.count(append_marker) != 1:
+              raise RuntimeError('Reservations.gs: gravação da reserva não encontrada')
+          reservations = reservations.replace(
+              append_marker,
+              append_marker + "      reservation.status,\n      '',\n      '',\n      '',\n      '',\n",
+              1,
+          )
+          write('apps-script/Reservations.gs', reservations)
 
-          # Remove o conjunto de cancelamentos dos contextos e das chamadas.
-          reservations_text = read('apps-script/Reservations.gs')
-          reservations_text = reservations_text.replace(
-              "    cancelled: cancellationSet_(readCancellations_(spreadsheet)),\n",
-              '',
-          )
-          reservations_text = reservations_text.replace('      context.cancelled,\n', '')
-          reservations_text = reservations_text.replace(
-              "    var cancelled = cancellationSet_(readCancellations_(spreadsheet));\n",
-              '',
-          )
-          reservations_text = reservations_text.replace('        cancelled,\n', '')
-          write('apps-script/Reservations.gs', reservations_text)
-
-          replace_once(
-              'apps-script/Reservations.gs',
-              "    var sheet = spreadsheet.getSheetByName(RESERVATIONS_SHEET_NAME_);",
-              "    var sheet = ensureAppendOnlySheet_(spreadsheet, RESERVATIONS_SHEET_NAME_, RESERVATIONS_HEADER_, 14);",
-          )
-          replace_once(
-              'apps-script/Reservations.gs',
-              """      reservation.createdAt,
-            serializeList_(reservation.periodTimes),
-          ]);""",
-              """      reservation.createdAt,
-            serializeList_(reservation.periodTimes),
-            reservation.status,
-            '',
-            '',
-            '',
-            '',
-          ]);""",
-          )
-
-          # Diagnóstico acompanha o caminho real, sem abrir CANCELAMENTOS.
           diagnostics = read('apps-script/Diagnostics.gs')
-          diagnostics = diagnostics.replace(
-              """  var cancellations = diagnosticMeasure_(timings, 'lerCancelamentosMs', function () {
-            return readCancellations_(spreadsheet);
-          });
-            var cancelled = diagnosticMeasure_(timings, 'processarCancelamentosMs', function () {
-            return cancellationSet_(cancellations);
-          });
-          """,
-              '',
+          diagnostics, count = re.subn(
+              r"  var cancellations = diagnosticMeasure_\(timings, 'lerCancelamentosMs', function \(\) \{\n"
+              r"    return readCancellations_\(spreadsheet\);\n"
+              r"  \}\);\n"
+              r"  var cancelled = diagnosticMeasure_\(timings, 'processarCancelamentosMs', function \(\) \{\n"
+              r"    return cancellationSet_\(cancellations\);\n"
+              r"  \}\);\n",
+              '', diagnostics, count=1,
           )
+          if count != 1:
+              raise RuntimeError('Diagnostics.gs: leituras de cancelamento não encontradas')
+          diagnostics = diagnostics.replace('    cancelled: cancelled,\n', '', 1)
           diagnostics = diagnostics.replace(
-              """    reservations: reservations,
-            cancelled: cancelled,
-          };""",
-              """    reservations: reservations,
-          };""",
-          )
-          diagnostics = diagnostics.replace(
-              """      reservations: reservations.length,
-            cancellations: cancellations.length,
-          },""",
-              """      reservations: reservations.length,
-            cancelledReservations: reservations.filter(function (reservation) {
-              return reservation.status !== RESERVATION_STATUS_.CONFIRMED;
-            }).length,
-          },""",
+              '      cancellations: cancellations.length,',
+              "      cancelledReservations: reservations.filter(function (reservation) {\n        return reservation.status !== RESERVATION_STATUS_.CONFIRMED;\n      }).length,",
+              1,
           )
           write('apps-script/Diagnostics.gs', diagnostics)
 
-          # Integração administrativa: mantém auditoria e atualiza a linha da reserva na mesma operação.
-          replace_once(
-              'src/integrations/google/googleReservations.ts',
-              """  createdAt: string;
-          }""",
-              """  createdAt: string;
-            storedStatus: GoogleReservationStatus;
-            storedCancelledPeriodIds: string[];
-            lastCancelledAt: string;
-            lastCancelledBy: string;
-            lastCancellationReason: string;
-          }""",
+          google = read('src/integrations/google/googleReservations.ts')
+          google = google.replace(
+              '  createdAt: string;\n}',
+              "  createdAt: string;\n  storedStatus: GoogleReservationStatus;\n  storedCancelledPeriodIds: string[];\n  lastCancelledAt: string;\n  lastCancelledBy: string;\n  lastCancellationReason: string;\n}",
+              1,
           )
-
-          replace_once(
-              'src/integrations/google/googleReservations.ts',
-              """        createdAt: getCell(row, headerIndex, 'CRIADO_EM'),
-              },""",
-              """        createdAt: getCell(row, headerIndex, 'CRIADO_EM'),
-                storedStatus:
-                  (getCell(row, headerIndex, 'STATUS') as GoogleReservationStatus) || 'CONFIRMED',
-                storedCancelledPeriodIds: unique(
-                  parseListCell(getCell(row, headerIndex, 'AULAS_CANCELADAS_IDS')),
-                ),
-                lastCancelledAt: getCell(row, headerIndex, 'CANCELADO_EM'),
-                lastCancelledBy: getCell(row, headerIndex, 'CANCELADO_POR'),
-                lastCancellationReason: getCell(row, headerIndex, 'MOTIVO_CANCELAMENTO'),
-              },""",
+          google = google.replace(
+              "        createdAt: getCell(row, headerIndex, 'CRIADO_EM'),\n",
+              "        createdAt: getCell(row, headerIndex, 'CRIADO_EM'),\n        storedStatus:\n          (getCell(row, headerIndex, 'STATUS') as GoogleReservationStatus) || 'CONFIRMED',\n        storedCancelledPeriodIds: unique(\n          parseListCell(getCell(row, headerIndex, 'AULAS_CANCELADAS_IDS')),\n        ),\n        lastCancelledAt: getCell(row, headerIndex, 'CANCELADO_EM'),\n        lastCancelledBy: getCell(row, headerIndex, 'CANCELADO_POR'),\n        lastCancellationReason: getCell(row, headerIndex, 'MOTIVO_CANCELAMENTO'),\n",
+              1,
           )
-
-          derive_old = """  const cancelledSet = new Set(cancellations.map((cancellation) => cancellation.periodId));
-            const cancelledPeriodIds = reservation.periodIds.filter((periodId) => cancelledSet.has(periodId));"""
-          derive_new = """  const cancelledSet = new Set([
-            ...reservation.storedCancelledPeriodIds,
-            ...cancellations.map((cancellation) => cancellation.periodId),
-          ]);
-            if (reservation.storedStatus === 'CANCELLED' && cancelledSet.size === 0) {
-              reservation.periodIds.forEach((periodId) => cancelledSet.add(periodId));
-            }
-            const cancelledPeriodIds = reservation.periodIds.filter((periodId) => cancelledSet.has(periodId));"""
-          replace_once('src/integrations/google/googleReservations.ts', derive_old, derive_new)
-
-          replace_once(
-              'src/integrations/google/googleReservations.ts',
-              """    createdAt: reservation.createdAt,
-            };""",
-              """    createdAt: reservation.createdAt,
-              storedStatus: reservation.status,
-              storedCancelledPeriodIds: reservation.cancelledPeriodIds,
-              lastCancelledAt: reservation.cancellations.at(-1)?.cancelledAt ?? '',
-              lastCancelledBy: reservation.cancellations.at(-1)?.cancelledBy ?? '',
-              lastCancellationReason: reservation.cancellations.at(-1)?.reason ?? '',
-            };""",
+          google = google.replace(
+              '  const cancelledSet = new Set(cancellations.map((cancellation) => cancellation.periodId));\n',
+              "  const cancelledSet = new Set([\n    ...reservation.storedCancelledPeriodIds,\n    ...cancellations.map((cancellation) => cancellation.periodId),\n  ]);\n  if (reservation.storedStatus === 'CANCELLED' && cancelledSet.size === 0) {\n    reservation.periodIds.forEach((periodId) => cancelledSet.add(periodId));\n  }\n",
+              1,
           )
-
-          cancel_load_old = """  const reservations = await listReservations(normalizedOptions);
+          google = google.replace(
+              '    createdAt: reservation.createdAt,\n  };',
+              "    createdAt: reservation.createdAt,\n    storedStatus: reservation.status,\n    storedCancelledPeriodIds: reservation.cancelledPeriodIds,\n    lastCancelledAt: reservation.cancellations.at(-1)?.cancelledAt ?? '',\n    lastCancelledBy: reservation.cancellations.at(-1)?.cancelledBy ?? '',\n    lastCancellationReason: reservation.cancellations.at(-1)?.reason ?? '',\n  };",
+              1,
+          )
+          load_old = """  const reservations = await listReservations(normalizedOptions);
             const reservation = reservations.find((candidate) => candidate.id === reservationId);"""
-          cancel_load_new = """  const schema = await ensureSchema(normalizedOptions);
+          load_new = """  const schema = await ensureSchema(normalizedOptions);
             const values = await requestGoogleApi<BatchGetValuesResponse>(
               normalizedOptions,
               batchGetUrl(normalizedOptions.spreadsheetId, [
@@ -315,41 +231,13 @@ jobs:
             const cancellationValues = values.valueRanges?.[1]?.values ?? [];
             const reservations = parseGoogleReservations(reservationValues, cancellationValues);
             const reservation = reservations.find((candidate) => candidate.id === reservationId);"""
-          replace_once('src/integrations/google/googleReservations.ts', cancel_load_old, cancel_load_new)
-
-          append_old = """  const appendRange = `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A:J`;
-            const params = new URLSearchParams({
-              valueInputOption: 'RAW',
-              insertDataOption: 'INSERT_ROWS',
-            });
-            await requestGoogleApi<unknown>(
-              normalizedOptions,
-              `${GOOGLE_SHEETS_API_URL}/${encodeURIComponent(normalizedOptions.spreadsheetId)}/values/${encodeURIComponent(appendRange)}:append?${params.toString()}`,
-              {
-                method: 'POST',
-                body: JSON.stringify({
-                  majorDimension: 'ROWS',
-                  values: appendedCancellations.map((cancellation) => [
-                    cancellation.id,
-                    cancellation.reservationId,
-                    cancellation.periodId,
-                    cancellation.periodLabel,
-                    cancellation.periodTime,
-                    cancellation.date,
-                    cancellation.laboratoryId,
-                    cancellation.cancelledAt,
-                    cancellation.cancelledBy,
-                    cancellation.reason,
-                  ]),
-                }),
-              },
-            );
-
-            return {
-              reservation: createUpdatedReservation(reservation, appendedCancellations),
-              appendedCancellations,
-            };"""
-          append_new = """  const reservationHeader = reservationValues[0] ?? schema.reservationsHeader;
+          if load_old not in google:
+              raise RuntimeError('googleReservations.ts: carregamento não encontrado')
+          google = google.replace(load_old, load_new, 1)
+          start = google.index("  const appendRange = `${quoteSheetTitle(GOOGLE_CANCELLATIONS_SHEET_TITLE)}!A:J`;")
+          end_marker = "\n  return {\n    reservation: createUpdatedReservation(reservation, appendedCancellations),\n    appendedCancellations,\n  };"
+          end = google.index(end_marker, start) + len(end_marker)
+          replacement = """  const reservationHeader = reservationValues[0] ?? schema.reservationsHeader;
             const reservationHeaderIndex = createHeaderIndex(
               reservationHeader,
               GOOGLE_RESERVATIONS_SHEET_TITLE,
@@ -416,10 +304,7 @@ jobs:
               `${GOOGLE_SHEETS_API_URL}/${encodeURIComponent(normalizedOptions.spreadsheetId)}/values:batchUpdate`,
               {
                 method: 'POST',
-                body: JSON.stringify({
-                  valueInputOption: 'RAW',
-                  data: updateData,
-                }),
+                body: JSON.stringify({ valueInputOption: 'RAW', data: updateData }),
               },
             );
 
@@ -427,33 +312,114 @@ jobs:
               reservation: createUpdatedReservation(reservation, appendedCancellations),
               appendedCancellations,
             };"""
-          replace_once('src/integrations/google/googleReservations.ts', append_old, append_new)
+          google = google[:start] + replacement + google[end:]
+          write('src/integrations/google/googleReservations.ts', google)
 
-          # Crédito do desenvolvedor na página inicial.
-          replace_once(
-              'src/pages/LandingPage.tsx',
-              """    description: 'Reservas e cancelamentos ficam registrados sem apagar as linhas originais.',""",
-              """    description:
-              'O estado atual fica na reserva e cada cancelamento continua registrado para auditoria.',""",
+          tests = read('src/integrations/google/googleReservations.test.ts')
+          tests = tests.replace('  onAppend: (body: unknown) => void,', '  onUpdate: (body: unknown) => void,', 1)
+          tests = tests.replace(
+              "    if (url.includes(':append?')) {\n      onAppend(parseRequestBody(init?.body));\n      return jsonResponse({ updates: { updatedRows: 1 } });\n    }",
+              "    if (url.endsWith('/values:batchUpdate')) {\n      onUpdate(parseRequestBody(init?.body));\n      return jsonResponse({ totalUpdatedRows: 2 });\n    }",
+              1,
           )
-          replace_once(
-              'src/pages/LandingPage.tsx',
-              """        <span>Feito para simplificar a rotina escolar.</span>
-              </footer>""",
-              """        <div className={styles.footerCredits}>
-                  <span>Feito para simplificar a rotina escolar.</span>
-                  <span>
-                    © 2026 Lab Reserva · Desenvolvido por Joelcio Maia ·{' '}
-                    <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
-                      Portfólio do desenvolvedor
-                    </a>
-                  </span>
-                </div>
-              </footer>""",
+          tests = tests.replace('GOOGLE_RESERVATIONS_HEADER.slice(0, -1)', 'GOOGLE_RESERVATIONS_HEADER.slice(0, 13)', 2)
+          tests = tests.replace(
+              "reservationRow('RES-LEGACY', 'P01; P02', '1ª aula; 2ª aula').slice(0, -1)",
+              "reservationRow('RES-LEGACY', 'P01; P02', '1ª aula; 2ª aula').slice(0, 13)",
+              1,
           )
+          tests = tests.replace(
+              "it('deriva estados parcial e total exclusivamente do histórico de CANCELAMENTOS'",
+              "it('combina o estado salvo na reserva com o histórico de CANCELAMENTOS'",
+              1,
+          )
+          old = """    expect(data).toEqual([
+              {
+                range: "'RESERVAS'!N1",
+                majorDimension: 'ROWS',
+                values: [['AULAS_HORARIOS']],
+              },
+              {
+                range: "'CANCELAMENTOS'!A1",
+                majorDimension: 'ROWS',
+                values: [[...GOOGLE_CANCELLATIONS_HEADER]],
+              },
+            ]);"""
+          new = """    expect(data).toEqual([
+              { range: "'RESERVAS'!N1", majorDimension: 'ROWS', values: [['AULAS_HORARIOS']] },
+              { range: "'RESERVAS'!O1", majorDimension: 'ROWS', values: [['STATUS']] },
+              {
+                range: "'RESERVAS'!P1",
+                majorDimension: 'ROWS',
+                values: [['AULAS_CANCELADAS_IDS']],
+              },
+              { range: "'RESERVAS'!Q1", majorDimension: 'ROWS', values: [['CANCELADO_EM']] },
+              { range: "'RESERVAS'!R1", majorDimension: 'ROWS', values: [['CANCELADO_POR']] },
+              {
+                range: "'RESERVAS'!S1",
+                majorDimension: 'ROWS',
+                values: [['MOTIVO_CANCELAMENTO']],
+              },
+              {
+                range: "'CANCELAMENTOS'!A1",
+                majorDimension: 'ROWS',
+                values: [[...GOOGLE_CANCELLATIONS_HEADER]],
+              },
+            ]);"""
+          if old not in tests:
+              raise RuntimeError('googleReservations.test.ts: expectativa de cabeçalho não encontrada')
+          tests = tests.replace(old, new, 1)
+          tests = tests.replace("item.range !== \"'RESERVAS'!N1\"", "!/[N-S]1$/.test(item.range)", 1)
+          tests = tests.replace('let appendBody: unknown;', 'let updateBody: unknown;', 2)
+          tests = tests.replace('appendBody = body;', 'updateBody = body;', 2)
+          pstart = tests.index('    expect(appendBody).toEqual({')
+          pend = tests.index('    expect(result.reservation).toMatchObject({', pstart)
+          partial = """    const partialData = (updateBody as { data: { range: string; values: unknown[][] }[] }).data;
+            expect(partialData.find((item) => item.range === "'RESERVAS'!O2")?.values).toEqual([
+              ['PARTIALLY_CANCELLED'],
+            ]);
+            expect(partialData.find((item) => item.range === "'RESERVAS'!P2")?.values).toEqual([
+              ['["P02"]'],
+            ]);
+            const partialAudit = partialData.find(
+              (item) => item.range === "'CANCELAMENTOS'!A2:J2",
+            );
+            expect(partialAudit?.values).toEqual([
+              [
+                'CANCEL-1',
+                'RES-1',
+                'P02',
+                '2ª aula',
+                '08:15–09:00',
+                '2026-08-10',
+                'LAB01',
+                '2026-08-02T11:00:00.000Z',
+                'laboratorista@escola.test',
+                'Professor escolheu a aula errada',
+              ],
+            ]);
+          """
+          tests = tests[:pstart] + partial + tests[pend:]
+          tests = tests.replace(
+              "    const values = (appendBody as { values: unknown[][] }).values;\n    expect(values).toHaveLength(1);\n    expect(values[0]?.[2]).toBe('P02');",
+              "    const totalData = (updateBody as { data: { range: string; values: unknown[][] }[] }).data;\n    const auditWrite = totalData.find((item) => item.range === \"'CANCELAMENTOS'!A3:J3\");\n    expect(auditWrite?.values).toHaveLength(1);\n    expect(auditWrite?.values[0]?.[2]).toBe('P02');\n    expect(totalData.find((item) => item.range === \"'RESERVAS'!O2\")?.values).toEqual([[\"CANCELLED\"]]);",
+              1,
+          )
+          write('src/integrations/google/googleReservations.test.ts', tests)
 
-          landing_css = read('src/pages/LandingPage.module.css')
-          landing_css += """
+          landing = read('src/pages/LandingPage.tsx')
+          landing = landing.replace(
+              "    description: 'Reservas e cancelamentos ficam registrados sem apagar as linhas originais.',",
+              "    description:\n      'O estado atual fica na reserva e cada cancelamento continua registrado para auditoria.',",
+              1,
+          )
+          landing = landing.replace(
+              '        <span>Feito para simplificar a rotina escolar.</span>\n      </footer>',
+              "        <div className={styles.footerCredits}>\n          <span>Feito para simplificar a rotina escolar.</span>\n          <span>\n            © 2026 Lab Reserva · Desenvolvido por Joelcio Maia ·{' '}\n            <a href=\"https://joelciomaia.github.io/\" target=\"_blank\" rel=\"noreferrer\">\n              Portfólio do desenvolvedor\n            </a>\n          </span>\n        </div>\n      </footer>",
+              1,
+          )
+          write('src/pages/LandingPage.tsx', landing)
+          write('src/pages/LandingPage.module.css', read('src/pages/LandingPage.module.css') + """
 
           .footerCredits {
             display: grid;
@@ -468,39 +434,24 @@ jobs:
             text-decoration: none;
           }
 
-          .footerCredits a:hover {
-            text-decoration: underline;
-          }
+          .footerCredits a:hover { text-decoration: underline; }
 
           @media (max-width: 48rem) {
-            .footerCredits {
-              justify-items: start;
-              text-align: start;
-            }
+            .footerCredits { justify-items: start; text-align: start; }
           }
-          """
-          write('src/pages/LandingPage.module.css', landing_css)
+          """)
 
-          # Crédito no rodapé da agenda semanal.
-          replace_once(
-              'src/pages/WeeklySchedulePage.tsx',
-              """      </section>
-            </div>
-          );""",
-              """      </section>
-
-                <footer className={styles.developerFooter}>
-                  <span>© 2026 Lab Reserva · Desenvolvido por Joelcio Maia</span>
-                  <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
-                    Portfólio do desenvolvedor
-                  </a>
-                </footer>
-              </div>
-            );""",
+          weekly = read('src/pages/WeeklySchedulePage.tsx')
+          marker = '      </section>\n    </div>\n  );'
+          if weekly.count(marker) != 1:
+              raise RuntimeError('WeeklySchedulePage.tsx: final não encontrado')
+          weekly = weekly.replace(
+              marker,
+              "      </section>\n\n      <footer className={styles.developerFooter}>\n        <span>© 2026 Lab Reserva · Desenvolvido por Joelcio Maia</span>\n        <a href=\"https://joelciomaia.github.io/\" target=\"_blank\" rel=\"noreferrer\">\n          Portfólio do desenvolvedor\n        </a>\n      </footer>\n    </div>\n  );",
+              1,
           )
-
-          weekly_css = read('src/pages/WeeklySchedulePage.module.css')
-          weekly_css += """
+          write('src/pages/WeeklySchedulePage.tsx', weekly)
+          write('src/pages/WeeklySchedulePage.module.css', read('src/pages/WeeklySchedulePage.module.css') + """
 
           .developerFooter {
             display: flex;
@@ -521,24 +472,19 @@ jobs:
             text-decoration: none;
           }
 
-          .developerFooter a:hover {
-            text-decoration: underline;
-          }
-          """
-          write('src/pages/WeeklySchedulePage.module.css', weekly_css)
+          .developerFooter a:hover { text-decoration: underline; }
+          """)
 
-          # Favicon com relógio.
-          replace_once(
-              'index.html',
-              """    <link
-              rel="icon"
-              href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23174a6e'/%3E%3Cpath d='M24 14h16M28 14v13L18 46a4 4 0 0 0 3 6h22a4 4 0 0 0 3-6L36 27V14' fill='none' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E"
-            />""",
-              """    <link
-              rel="icon"
-              href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23174a6e'/%3E%3Ccircle cx='32' cy='32' r='19' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M32 20v13l9 6' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='2.5' fill='white'/%3E%3C/svg%3E"
-            />""",
+          index = read('index.html')
+          index, count = re.subn(
+              r'href="data:image/svg\+xml,[^"]+"',
+              "href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23174a6e'/%3E%3Ccircle cx='32' cy='32' r='19' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M32 20v13l9 6' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='2.5' fill='white'/%3E%3C/svg%3E\"",
+              index,
+              count=1,
           )
+          if count != 1:
+              raise RuntimeError('index.html: favicon não encontrado')
+          write('index.html', index)
           PY
 
       - run: npm ci
