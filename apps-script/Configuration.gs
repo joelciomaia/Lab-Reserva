@@ -92,10 +92,24 @@ function readLaboratories_(table) {
       throwApiError_('CONFIGURATION_ERROR', 'O laboratório ' + id + ' está repetido.');
     }
     seenIds[id] = true;
+
+    var maxConcurrentClasses = integerCell_(
+      tableCell_(table, row, 'LIMITE_SIMULTANEO'),
+      location + ' (LIMITE_SIMULTANEO)',
+      { optional: true, minimum: 1, maximum: 100 },
+    );
+    var maxStudentCapacity = integerCell_(
+      tableCell_(table, row, 'CAPACIDADE_ALUNOS'),
+      location + ' (CAPACIDADE_ALUNOS)',
+      { optional: true, minimum: 1, maximum: 100000 },
+    );
+
     result.push({
       id: id,
       name: name,
       active: booleanCell_(tableCell_(table, row, 'ATIVO'), location + ' (ATIVO)', false),
+      maxConcurrentClasses: maxConcurrentClasses === null ? 1 : maxConcurrentClasses,
+      maxStudentCapacity: maxStudentCapacity,
       notifyOnNewBooking: booleanCell_(
         tableCell_(table, row, 'AVISAR_NOVA_RESERVA'),
         location + ' (AVISAR_NOVA_RESERVA)',
