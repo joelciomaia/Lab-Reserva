@@ -1,0 +1,122 @@
+name: Reexecutar correções de data e desempenho
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-agenda-fixes-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Aplicar correções
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          workflow = Path('.github/workflows/apply-agenda-fixes-v2.yml').read_text(encoding='utf-8')
+          start_marker = "          python <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          source = dedent(workflow[start:end])
+
+          old_helper = '''def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: esperado 1 trecho, encontrado {count}')
+              write(path, text.replace(old, new, 1))
+          '''
+          new_helper = '''def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count == 1:
+                  write(path, text.replace(old, new, 1))
+                  return
+              if path == 'apps-script/Support.gs' and 'spreadsheet.getSpreadsheetTimeZone()' in old:
+                  replacement = """function sheetDateToIso_(value, spreadsheet, location) {
+            if (value instanceof Date && !Number.isNaN(value.getTime())) {
+              // Datas da agenda representam somente o dia, não um instante.
+              return Utilities.formatDate(value, 'UTC', 'yyyy-MM-dd');
+            }
+            var text = optionalText_(value);
+            var brazilian = /^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/.exec(text);
+            if (brazilian) {
+              text = brazilian[3] + '-' + brazilian[2] + '-' + brazilian[1];
+            }
+            try {
+              return assertIsoDate_(text);
+            } catch (error) {
+              if (isApiError_(error)) {
+                throwApiError_('DATA_INTEGRITY_ERROR', location + ' contém uma data inválida.', {
+                  location: location,
+                });
+              }
+              throw error;
+            }
+          }
+
+          """
+                  replace_between(
+                      path,
+                      'function sheetDateToIso_(value, spreadsheet, location) {',
+                      'function safeSheetText_(value)',
+                      replacement,
+                  )
+                  return
+              if path == 'apps-script/Support.gs' and old.startswith('function safeSheetText_'):
+                  replacement = """function safeSheetText_(value) {
+            var text = String(value === null || value === undefined ? '' : value);
+            // Impede o Sheets de converter uma data ISO em objeto Date e deslocar o dia.
+            if (/^\\d{4}-\\d{2}-\\d{2}$/.test(text)) {
+              return "'" + text;
+            }
+            return /^[=+\\-@]/.test(text) ? "'" + text : text;
+          }
+
+          """
+                  replace_between(
+                      path,
+                      'function safeSheetText_(value) {',
+                      'function appendImmutableRow_(sheet, values)',
+                      replacement,
+                  )
+                  return
+              raise RuntimeError(f'{path}: esperado 1 trecho, encontrado {count}')
+          '''
+          if source.count(old_helper) != 1:
+              raise RuntimeError('Não foi possível adaptar o aplicador v2.')
+          source = source.replace(old_helper, new_helper, 1)
+          exec(compile(source, 'apply-agenda-fixes-v2', 'exec'))
+          PY
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Validar compilação
+        run: npm run build
+
+      - name: Publicar correções
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps-script src
+          git commit -m "Corrige data e reduz espera da agenda"
+          git push
