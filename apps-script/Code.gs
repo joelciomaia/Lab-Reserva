@@ -104,25 +104,7 @@ function parseJsonPayload_(contents) {
   return payload;
 }
 
-function dispatchWritePayload_(payload) {
-  if (payload.action === 'registerSchool') {
-    if (!isPlainObject_(payload.request)) {
-      throwApiError_('BAD_REQUEST', 'Informe os dados da escola em request.');
-    }
-    return registerSchool_(payload.request);
-  }
-
-  if (payload.action === 'createReservation') {
-    if (!isPlainObject_(payload.request)) {
-      throwApiError_('BAD_REQUEST', 'Informe a reserva em request.');
-    }
-    return createReservation_(requiredText_(payload.school, 'school', 128), payload.request);
-  }
-
-  throwApiError_('UNKNOWN_ACTION', 'A ação POST informada não existe.');
-}
-
-function dispatchBridgePayload_(payload) {
+function dispatchReadPayload_(payload) {
   if (payload.action === 'serviceInfo') {
     return serviceInfo_();
   }
@@ -148,6 +130,38 @@ function dispatchBridgePayload_(payload) {
         ? payload.dates
         : splitList_(requiredText_(payload.dates, 'dates', 512)),
     });
+  }
+
+  return null;
+}
+
+function dispatchWritePayload_(payload) {
+  var readResult = dispatchReadPayload_(payload);
+  if (readResult !== null) {
+    return readResult;
+  }
+
+  if (payload.action === 'registerSchool') {
+    if (!isPlainObject_(payload.request)) {
+      throwApiError_('BAD_REQUEST', 'Informe os dados da escola em request.');
+    }
+    return registerSchool_(payload.request);
+  }
+
+  if (payload.action === 'createReservation') {
+    if (!isPlainObject_(payload.request)) {
+      throwApiError_('BAD_REQUEST', 'Informe a reserva em request.');
+    }
+    return createReservation_(requiredText_(payload.school, 'school', 128), payload.request);
+  }
+
+  throwApiError_('UNKNOWN_ACTION', 'A ação POST informada não existe.');
+}
+
+function dispatchBridgePayload_(payload) {
+  var readResult = dispatchReadPayload_(payload);
+  if (readResult !== null) {
+    return readResult;
   }
 
   return dispatchWritePayload_(payload);
