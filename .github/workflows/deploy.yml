@@ -1,4 +1,4 @@
-﻿name: Publicar no GitHub Pages
+name: Publicar no GitHub Pages
 
 on:
   push:
@@ -37,7 +37,10 @@ jobs:
       - name: Compilar projeto
         run: npm run build
         env:
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_CLIENT_ID: 357415328397-fjcaahml2m3bosq8927nbf14rg1oo7b4.apps.googleusercontent.com
+          VITE_GOOGLE_APPS_SCRIPT_URL: https://script.google.com/macros/s/AKfycbxPjBrnUQO7odOzdlsRneDeLN7EKQfEFSZ-B8qplOKdjBMtGyLqFZTTmwC9aEVWJ-Ml8Q/exec
+          VITE_GOOGLE_APPS_SCRIPT_ACCOUNT_EMAIL: joelciomaia@hotmail.com
+          VITE_PUBLIC_APP_URL: https://joelciomaia.github.io/Lab-Reserva/
 
       - name: Enviar arquivos compilados
         uses: actions/upload-pages-artifact@v4
