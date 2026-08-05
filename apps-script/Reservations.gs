@@ -132,16 +132,29 @@ function entryConflictsWithPeriod_(entry, period) {
   return periodsOverlap_(entry.time, periodTime);
 }
 
-function occupyingReservation_(reservations, cancelled, periods, laboratoryId, date, period) {
+function occupyingReservations_(reservations, cancelled, periods, laboratoryId, date, period) {
+  var occupying = [];
   for (var reservationIndex = 0; reservationIndex < reservations.length; reservationIndex += 1) {
     var reservation = reservations[reservationIndex];
     if (reservation.laboratoryId !== laboratoryId || reservation.date !== date) continue;
     var entries = reservationEntries_(reservation, periods, cancelled);
     for (var entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-      if (entryConflictsWithPeriod_(entries[entryIndex], period)) return reservation;
+      if (entryConflictsWithPeriod_(entries[entryIndex], period)) {
+        occupying.push(reservation);
+        break;
+      }
     }
   }
-  return null;
+  return occupying;
+}
+
+function reservationSummary_(reservation) {
+  return {
+    id: reservation.id,
+    teacherName: reservation.teacherName,
+    subject: reservation.subject,
+    classGroup: reservation.classGroup,
+  };
 }
 
 function getAvailability_(school, request) {
@@ -149,17 +162,19 @@ function getAvailability_(school, request) {
   var date = assertIsoDate_(request.date);
   var spreadsheet = spreadsheetForSchool_(school);
   var configuration = readConfiguration_(spreadsheet);
-  if (!activeLaboratory_(configuration, laboratoryId)) {
+  var laboratory = activeLaboratory_(configuration, laboratoryId);
+  if (!laboratory) {
     throwApiError_('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');
   }
   var reservations = readReservations_(spreadsheet);
   var cancelled = cancellationSet_(readCancellations_(spreadsheet));
   var applicable = applicablePeriods_(configuration, date);
+  var maxConcurrentClasses = laboratory.maxConcurrentClasses || 1;
   var result = [];
 
   for (var index = 0; index < applicable.length; index += 1) {
     var period = applicable[index];
-    var reservation = occupyingReservation_(
+    var occupying = occupyingReservations_(
       reservations,
       cancelled,
       configuration.periods,
@@ -167,6 +182,8 @@ function getAvailability_(school, request) {
       date,
       period,
     );
+    var summaries = occupying.map(reservationSummary_);
+    var remainingCapacity = Math.max(0, maxConcurrentClasses - summaries.length);
     var availability = {
       periodId: period.id,
       shiftId: period.shiftId,
@@ -176,12 +193,14 @@ function getAvailability_(school, request) {
       label: period.name,
       startTime: period.startTime,
       endTime: period.endTime,
-      status: reservation ? 'UNAVAILABLE' : 'AVAILABLE',
+      status: remainingCapacity > 0 ? 'AVAILABLE' : 'UNAVAILABLE',
+      reservations: summaries,
+      reservationCount: summaries.length,
+      maxConcurrentClasses: maxConcurrentClasses,
+      remainingCapacity: remainingCapacity,
     };
-    if (reservation) {
-      availability.reservation = {
-        id: reservation.id,
-      };
+    if (summaries.length > 0) {
+      availability.reservation = summaries[0];
     }
     result.push(availability);
   }
@@ -233,8 +252,9 @@ function createReservation_(school, rawRequest) {
 
     var reservations = readReservations_(spreadsheet);
     var cancelled = cancellationSet_(readCancellations_(spreadsheet));
+    var maxConcurrentClasses = laboratory.maxConcurrentClasses || 1;
     for (var periodIndex = 0; periodIndex < selected.length; periodIndex += 1) {
-      var conflict = occupyingReservation_(
+      var conflicts = occupyingReservations_(
         reservations,
         cancelled,
         configuration.periods,
@@ -242,10 +262,16 @@ function createReservation_(school, rawRequest) {
         request.date,
         selected[periodIndex],
       );
-      if (conflict) {
-        throwApiError_('TIME_CONFLICT', 'Um dos horários selecionados não está mais disponível.', {
-          periodId: selected[periodIndex].id,
-        });
+      if (conflicts.length >= maxConcurrentClasses) {
+        throwApiError_(
+          'TIME_CONFLICT',
+          'Um dos horários selecionados atingiu o limite de turmas simultâneas.',
+          {
+            periodId: selected[periodIndex].id,
+            reservationCount: conflicts.length,
+            maxConcurrentClasses: maxConcurrentClasses,
+          },
+        );
       }
     }
 
