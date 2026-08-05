@@ -124,7 +124,7 @@ export interface AppsScriptBackendOptions {
 
 export class AppsScriptBackend implements BackendClient {
   private readonly endpoint: string;
-  private readonly fetchImplementation?: typeof window.fetch;
+  private readonly fetchImplementation: typeof window.fetch | undefined;
 
   constructor(endpoint: string, options: AppsScriptBackendOptions = {}) {
     this.endpoint = normalizeEndpoint(endpoint);
