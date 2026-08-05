@@ -48,10 +48,31 @@ function handleIframeTransport_(parameters) {
   var requestId = requiredText_(parameters.requestId, 'requestId', 200);
   var targetOrigin = allowedIframeOrigin_(requiredText_(parameters.origin, 'origin', 300));
   var envelope = executeSafely_(function () {
-    return dispatchBridgePayload_(parseJsonPayload_(parameters.payload));
+    var payload = parameters.payloadBase64
+      ? parseBase64JsonPayload_(parameters.payloadBase64)
+      : parseJsonPayload_(parameters.payload);
+    return dispatchBridgePayload_(payload);
   });
 
   return iframeOutput_(envelope, requestId, targetOrigin);
+}
+
+function parseBase64JsonPayload_(contents) {
+  var encoded = requiredText_(contents, 'payloadBase64', 100000);
+
+  try {
+    var normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    while (normalized.length % 4) {
+      normalized += '=';
+    }
+    var decoded = Utilities.newBlob(Utilities.base64Decode(normalized)).getDataAsString('UTF-8');
+    return parseJsonPayload_(decoded);
+  } catch (error) {
+    if (isApiError_(error)) {
+      throw error;
+    }
+    throwApiError_('BAD_REQUEST', 'O payload codificado não contém um JSON válido.');
+  }
 }
 
 function parseJsonPayload_(contents) {
@@ -145,11 +166,11 @@ function iframeOutput_(envelope, requestId, targetOrigin) {
   var serializedOrigin = JSON.stringify(targetOrigin);
   var html =
     '<!doctype html><html><head><meta charset="utf-8"></head><body>' +
-    '<script>window.top.postMessage(' +
+    '<script>(function(){var message=' +
     serializedMessage +
-    ',' +
+    ';var targetOrigin=' +
     serializedOrigin +
-    ');<\/script></body></html>';
+    ';function send(){window.top.postMessage(message,targetOrigin);}send();setTimeout(send,100);setTimeout(send,500);})();<\/script></body></html>';
 
   return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(
     HtmlService.XFrameOptionsMode.ALLOWALL,
