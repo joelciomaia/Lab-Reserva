@@ -157,27 +157,33 @@ function reservationSummary_(reservation) {
   };
 }
 
-function getAvailability_(school, request) {
-  var laboratoryId = requiredText_(request.laboratoryId, 'laboratoryId', 128);
-  var date = assertIsoDate_(request.date);
+function availabilityContext_(school, laboratoryId) {
   var spreadsheet = spreadsheetForSchool_(school);
   var configuration = readConfiguration_(spreadsheet);
   var laboratory = activeLaboratory_(configuration, laboratoryId);
   if (!laboratory) {
     throwApiError_('LABORATORY_NOT_FOUND', 'Laboratório não encontrado ou inativo.');
   }
-  var reservations = readReservations_(spreadsheet);
-  var cancelled = cancellationSet_(readCancellations_(spreadsheet));
-  var applicable = applicablePeriods_(configuration, date);
-  var maxConcurrentClasses = laboratory.maxConcurrentClasses || 1;
+
+  return {
+    configuration: configuration,
+    laboratory: laboratory,
+    reservations: readReservations_(spreadsheet),
+    cancelled: cancellationSet_(readCancellations_(spreadsheet)),
+  };
+}
+
+function buildAvailabilityResponse_(context, laboratoryId, date) {
+  var applicable = applicablePeriods_(context.configuration, date);
+  var maxConcurrentClasses = context.laboratory.maxConcurrentClasses || 1;
   var result = [];
 
   for (var index = 0; index < applicable.length; index += 1) {
     var period = applicable[index];
     var occupying = occupyingReservations_(
-      reservations,
-      cancelled,
-      configuration.periods,
+      context.reservations,
+      context.cancelled,
+      context.configuration.periods,
       laboratoryId,
       date,
       period,
@@ -206,6 +212,52 @@ function getAvailability_(school, request) {
   }
 
   return { date: date, laboratoryId: laboratoryId, periods: result };
+}
+
+function getAvailability_(school, request) {
+  var laboratoryId = requiredText_(request.laboratoryId, 'laboratoryId', 128);
+  var date = assertIsoDate_(request.date);
+  var context = availabilityContext_(school, laboratoryId);
+  return buildAvailabilityResponse_(context, laboratoryId, date);
+}
+
+function validateAvailabilityDates_(rawDates) {
+  if (!Array.isArray(rawDates) || rawDates.length === 0) {
+    throwApiError_('VALIDATION_ERROR', 'Informe pelo menos uma data para consultar.', {
+      field: 'dates',
+    });
+  }
+  if (rawDates.length > 31) {
+    throwApiError_('VALIDATION_ERROR', 'A consulta de disponibilidade aceita no máximo 31 datas.', {
+      field: 'dates',
+      maximum: 31,
+    });
+  }
+
+  var dates = [];
+  var seen = Object.create(null);
+  for (var index = 0; index < rawDates.length; index += 1) {
+    var date = assertIsoDate_(optionalText_(rawDates[index]));
+    if (seen[date]) {
+      throwApiError_('VALIDATION_ERROR', 'A consulta repete a data ' + date + '.', {
+        field: 'dates',
+        date: date,
+      });
+    }
+    seen[date] = true;
+    dates.push(date);
+  }
+  return dates;
+}
+
+function getWeekAvailability_(school, request) {
+  var laboratoryId = requiredText_(request.laboratoryId, 'laboratoryId', 128);
+  var dates = validateAvailabilityDates_(request.dates);
+  var context = availabilityContext_(school, laboratoryId);
+
+  return dates.map(function (date) {
+    return buildAvailabilityResponse_(context, laboratoryId, date);
+  });
 }
 
 function validateCreateRequest_(request) {
