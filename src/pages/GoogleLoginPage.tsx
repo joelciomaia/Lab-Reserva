@@ -160,7 +160,7 @@ export function GoogleLoginPage() {
         )}
 
         <p className={styles.note}>
-          O acesso fica limitado às planilhas criadas ou escolhidas no Lab Reserva.
+          O acesso fica limitado às planilhas criadas ou escolhidas no Reserva Fácil.
         </p>
       </section>
     </div>
