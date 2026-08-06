@@ -18,7 +18,7 @@ const steps = [
     number: '01',
     icon: LogIn,
     title: 'Entre com a conta da escola',
-    description: 'O laboratorista autoriza somente os arquivos que o Lab Reserva cria ou utiliza.',
+    description: 'O laboratorista autoriza somente os arquivos que o Reserva Fácil cria ou utiliza.',
   },
   {
     number: '02',
@@ -132,11 +132,11 @@ export function LandingPage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div className={styles.headerInner}>
-          <Link className={styles.brand} to="/" aria-label="Lab Reserva — início">
+          <Link className={styles.brand} to="/" aria-label="Reserva Fácil — início">
             <span className={styles.brandMark} aria-hidden="true">
               <CalendarCheck2 size={21} />
             </span>
-            Lab Reserva
+            Reserva Fácil
           </Link>
 
           <nav className={styles.navigation} aria-label="Navegação da apresentação">
@@ -241,7 +241,7 @@ export function LandingPage() {
               </span>
               <span>
                 <small>Planilha da escola</small>
-                <strong>Lab Reserva</strong>
+                <strong>Reserva Fácil</strong>
               </span>
               <span className={styles.liveBadge}>Sincronizada</span>
             </div>
@@ -296,14 +296,14 @@ export function LandingPage() {
         <div>
           <span className={styles.footerBrand}>
             <CalendarCheck2 size={19} aria-hidden="true" />
-            Lab Reserva
+            Reserva Fácil
           </span>
           <p>Agenda de laboratórios conectada ao Google Sheets.</p>
         </div>
         <div className={styles.footerCredits}>
           <span>Feito para simplificar a rotina escolar.</span>
           <span>
-            © 2026 Lab Reserva · Desenvolvido por Joelcio Maia ·{' '}
+            © 2026 Reserva Fácil · Desenvolvido por Joelcio Maia ·{' '}
             <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
               Portfólio do desenvolvedor
             </a>
