@@ -3,7 +3,7 @@ import { CalendarPlus, Check, ChevronLeft, ChevronRight, Settings } from 'lucide
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useBootstrap } from '../app/BootstrapContext';
-import { Button, ErrorMessage, Loading } from '../components';
+import { Button, DeveloperCredit, ErrorMessage, Loading } from '../components';
 import { WeeklyCalendar } from '../features/calendar';
 import type { AppError, AvailabilityResponse } from '../types';
 import { getFriendlyError } from '../types';
@@ -274,10 +274,7 @@ export function WeeklySchedulePage() {
       </section>
 
       <footer className={styles.developerFooter}>
-        <span>© 2026 Lab Reserva · Desenvolvido por Joelcio Maia</span>
-        <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
-          Portfólio do desenvolvedor
-        </a>
+        <DeveloperCredit productName="Reserva Fácil" />
       </footer>
     </div>
   );
