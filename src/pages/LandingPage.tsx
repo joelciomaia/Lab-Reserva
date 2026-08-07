@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { DeveloperCredit } from '../components';
 import styles from './LandingPage.module.css';
 
 const LOGIN_PATH = '/gerenciar/entrar';
@@ -302,12 +303,7 @@ export function LandingPage() {
         </div>
         <div className={styles.footerCredits}>
           <span>Feito para simplificar a rotina escolar.</span>
-          <span>
-            © 2026 Reserva Fácil · Desenvolvido por Joelcio Maia ·{' '}
-            <a href="https://joelciomaia.github.io/" target="_blank" rel="noreferrer">
-              Portfólio do desenvolvedor
-            </a>
-          </span>
+          <DeveloperCredit productName="Reserva Fácil" />
         </div>
       </footer>
     </div>
